@@ -1,0 +1,13 @@
+# Ignore data and plot directories
+data/
+plots/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+*.out
+*.err
+
