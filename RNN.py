@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import optuna
 from sklearn.model_selection import KFold
 
-date = "26021648"
+date = "26022042"
 
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -409,13 +409,16 @@ print(f"Hybrid Model Average Log Likelihood: {hybrid_avg_log_likelihood:.4f}")
 # Create x-axes for plotting.
 # For the RNN, the number of trials is the sequence length.
 # For the Hybrid model, we assume one row per trial.
-trials = list(range(1, len(concatenated_ll) + 1))
+# Suppose testing starts at trial 101 and hybrid at trial 201
+train_trials = list(range(1, len(train_cum_ll) + 1))
+test_trials = list(range(len(train_cum_ll), len(train_cum_ll) + len(test_cum_ll)))
+hybrid_trials = list(range(len(trial_log_likelihoods_hybrid)))
 
-# Plot cumulative log likelihoods
 plt.figure(figsize=(10, 6))
-plt.plot(trials, train_cum_ll, label='RNN Training Cumulative Log Likelihood', marker='o')
-plt.plot(trials, test_cum_ll, label='RNN Testing Cumulative Log Likelihood', marker='o')
-plt.plot(trials, trial_log_likelihoods_hybrid, label='Hybrid Model Cumulative Log Likelihood', marker='o')
+plt.plot(train_trials, train_cum_ll, label='RNN Training Cumulative Log Likelihood', marker='o')
+plt.plot(test_trials, test_cum_ll, label='RNN Testing Cumulative Log Likelihood', marker='o')
+plt.plot(hybrid_trials, trial_log_likelihoods_hybrid, label='Hybrid Model Cumulative Log Likelihood', marker='o')
+
 plt.xlabel('Trial')
 plt.ylabel('Cumulative Log Likelihood')
 plt.title('Cumulative Log Likelihood per Trial: RNN vs. Hybrid Model')
@@ -424,6 +427,7 @@ plt.grid(True)
 save_path = os.path.join('plots', f"RNNHybridlikelihood{date}.png")
 plt.savefig(save_path)
 plt.show()
+
 
 
 
