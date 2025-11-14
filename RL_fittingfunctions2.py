@@ -183,8 +183,7 @@ def qlearning_full(param, sessions, choices, rewards, context, model_config):
         session_indices = np.where(sessions == session)[0]
         choice = choices[session_indices]
         reward = rewards[session_indices]
-        context_session = context[session_indices] if context is not None else None       
-        #print(f"context: {context_session}") 
+        context_session = context[session_indices] if context is not None else None        
 
         T = len(choice)
         Q = np.zeros((2, T))
@@ -205,7 +204,6 @@ def qlearning_full(param, sessions, choices, rewards, context, model_config):
 
             if t > 0:  
                 if context_session is not None and context_session[t] != context_session[t - 1]:
-                #if t%50==0:
                     Q[:, t] = [Q_init_0, Q_init_1]  # Reset Q-values on context change
                     CT[:, t] = 0  # Reset choice trace on context change    
 
@@ -216,21 +214,9 @@ def qlearning_full(param, sessions, choices, rewards, context, model_config):
                 continue
 
             # Compute choice probabilities
-            # CORRECT softmax calculation:
-            v0 = beta * Q[0, t] + phi * CT[0, t]
-            v1 = beta * Q[1, t] + phi * CT[1, t]
-
-            # Numerically stable version
-            max_v = max(v0, v1)
-            p1[t] = np.exp(v0 - max_v) / (np.exp(v0 - max_v) + np.exp(v1 - max_v))
-
-            #p1[t] = np.exp(beta * Q[0, t] + phi * CT[0, t]) / np.exp(beta * Q[:, t] + phi * CT[:, t]).sum()
+            p1[t] = np.exp(beta * Q[0, t] + phi * CT[0, t]) / np.exp(beta * Q[:, t] + phi * CT[:, t]).sum()
             likelihood = np.clip((choice[t] == 0) * p1[t] + (choice[t] == 1) * (1 - p1[t]), 0.00001, 0.99999)
             ll += np.log(likelihood)
-            if session == unique_sessions[0] and t < 100:
-                old_p1 = np.exp(beta * Q[0, t] + phi * CT[0, t]) / np.exp(beta * Q[:, t] + phi * CT[:, t]).sum()
-                new_p1 = np.exp(v0) / (np.exp(v0) + np.exp(v1))
-                #print(f"t={t}: Q={Q[:, t]}, old_p1={old_p1:.3f}, new_p1={new_p1:.3f}, choice={choice[t]}, reward={reward[t]}")
 
             # Update Q-values and choice trace for the next trial
             if t < T - 1:
@@ -241,21 +227,12 @@ def qlearning_full(param, sessions, choices, rewards, context, model_config):
                     alphaN if asymmetric_alpha else
                     alpha
                 ) * delta
-                """delta = reward[t] - Q[choice[t], t]
-                learning_rate = alphaP if asymmetric_alpha and delta > 0 else (alphaN if asymmetric_alpha else alpha)
-                Q[choice[t], t + 1] = Q[choice[t], t] + learning_rate * delta
-                
-                # Then apply forgetting to UNCHOSEN option only
-                Q[1 - choice[t], t + 1] = (1 - alphaF) * Q[1 - choice[t], t]"""
 
                 # Update choice trace
                 CT[choice[t], t + 1] = CT[choice[t], t] + tau * (1 - CT[choice[t], t])
                 CT[1 - choice[t], t + 1] = CT[1 - choice[t], t] + tau * (0 - CT[1 - choice[t], t])
 
         p1_series[session_indices] = p1
-        #print(f"alpha: {alpha}")
-        #print(f"p1: {p1}")
-        #print(f"Q-values: {Q}")
 
     return -ll, p1_series
 
@@ -321,54 +298,35 @@ def fit_qlearning_model(opt_function, sessions, choices, rewards, context=None, 
     if forgetting_type == "free":
         lblist += [0]  # alphaF
         ublist += [1]  # alphaF
-    lblist += [2]  # beta
-    ublist += [5]  # beta
+    lblist += [0]  # beta
+    ublist += [20]  # beta
 
     if choice_trace:
         lblist += [-10, 0]  # phi, tau
         ublist += [10, 1]  # phi, tau
-    #print(f"lb list (number of entries is number of params): {lblist}")
 
     # Optimization
     best_neg_ll = np.inf
     best_params = None
     best_p1 = None
-    grid = np.linspace(0, 1, 100)
-    #print(f"choices: {choices}")
 
-    #for val in grid:
-        #param_ini = np.array([val, 1])
-        #param_ini = np.random.uniform(0, 0.9, len(lblist))
     for _ in range(n_iter):
         param_ini = np.random.uniform(0, 0.9, len(lblist))
 
         res = minimize(
             fun=lambda param: opt_function(param, sessions, choices, rewards, context, config)[0],  # contextを追加
             x0=param_ini,
-            method= 'SLSQP',#'L-BFGS-B',#'SLSQP',  # 'L-BFGS-B', # 'TNC'
+            method='SLSQP',  # 'L-BFGS-B', # 'TNC'
             bounds=list(zip(lblist, ublist)),
             tol=1e-4
         )
 
         neg_ll, p1 = opt_function(res.x, sessions, choices, rewards, context, config)
-        #print(f"param_val: {val}; neg_ll: {neg_ll}")
-        
         if neg_ll < best_neg_ll:
             best_neg_ll = neg_ll
             best_params = res.x
             best_p1 = p1
 
-        
-
-
-        """neg_ll, p1 = opt_function(res.x, sessions, choices, rewards, context, config)
-        if neg_ll < best_neg_ll:
-            best_neg_ll = neg_ll
-            best_params = res.x
-            best_p1 = p1"""
-
-        
-    print(f"chosen parameters: {best_params} with nll {best_neg_ll}")
     neg_ll, p1 = opt_function(best_params, sessions, choices, rewards, context, config)
     return best_params, neg_ll, p1
 
@@ -545,7 +503,6 @@ def compute_negll_and_normalized_ll_per_session_individual_fit(opt_function, par
             continue
 
         param = params_per_session.get(session)
-        print(f"session {session}, param {param}")
         if param is None:
             raise ValueError(f"Parameters for session {session} are not provided.")
 
@@ -555,7 +512,7 @@ def compute_negll_and_normalized_ll_per_session_individual_fit(opt_function, par
         # Normalize using only valid trials
         normalized_ll = np.exp(-neg_ll / num_valid_trials)  # Only count valid trials
 
-        #print(f"Session: {session}, neg_ll: {neg_ll}, num_valid_trials: {num_valid_trials}, normalized_ll: {normalized_ll}")
+        print(f"Session: {session}, neg_ll: {neg_ll}, num_valid_trials: {num_valid_trials}, normalized_ll: {normalized_ll}")
 
         session_results.append({
             "session": session,
@@ -594,7 +551,7 @@ def compute_negll_and_normalized_ll_per_session_common_fit(opt_function, common_
         # Normalize using only valid trials
         normalized_ll = np.exp(-neg_ll / num_valid_trials)  # Only count valid trials
 
-        #print(f"Session: {session}, neg_ll: {neg_ll}, num_valid_trials: {num_valid_trials}, normalized_ll: {normalized_ll}")
+        print(f"Session: {session}, neg_ll: {neg_ll}, num_valid_trials: {num_valid_trials}, normalized_ll: {normalized_ll}")
 
         session_results.append({
             "session": session,
@@ -691,8 +648,6 @@ def qlearning_full_with_prior(param, sessions, choices, rewards, context=None, m
     neg_ll, p1_series = qlearning_full(param, sessions, choices, rewards, context, model_config)
 
     # Return negative log-posterior (log-likelihood + log-prior)
-    if np.isnan(neg_ll) or np.isnan(prior_log_prob):
-        print("NaN detected in objective:", param)
     return neg_ll - prior_log_prob, p1_series
 
 
@@ -718,7 +673,6 @@ def fit_qlearning_by_session_MAP(df, model_config, n_iter=10):
         choices = group['c'].values
         rewards = group['r'].values
         context = group['context'].values if 'context' in group.columns else None
-        #print(f"Session {session}: {len(group)} trials")
 
         best_params, best_neg_ll, p1 = fit_qlearning_model(
             qlearning_full_with_prior, sessions, choices, rewards, context, model_config, n_iter
@@ -946,10 +900,9 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
 
             # Compute normalized likelihoods for individual fit on test data (MAP)
             print("  Compute results for individual fit (MAP)")
-            print(f"parameters: {params_per_session_MAP}")
             results_individual_MAP = compute_negll_and_normalized_ll_per_session_individual_fit(
-                qlearning_full, params_per_session_MAP, df_train, model_config
-            ) #changed dftest to dftrain
+                qlearning_full, params_per_session_MAP, df_test, model_config
+            )
             results_individual_MAP['model'] = f"{model_name} (MAP)"
             model_results.append(results_individual_MAP[['session', 'normalized_likelihood', 'model']])
 

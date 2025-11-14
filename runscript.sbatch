@@ -20,4 +20,4 @@
 
 
  
-python IDtest.py
+python run_Q_model.py

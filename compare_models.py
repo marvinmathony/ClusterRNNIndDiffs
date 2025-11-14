@@ -59,7 +59,7 @@ class LookupEncoder(nn.Module):
     def forward(self, idx):
         return self.mu(idx), self.logvar(idx)
 
-class LookupEncoderZ(nn.Module):
+"""class LookupEncoderZ(nn.Module):
     def __init__(self, n_participants, z_dim):
         super().__init__()
         #print(f"number of participants: {n_participants}, z_dim: {z_dim}")
@@ -69,23 +69,37 @@ class LookupEncoderZ(nn.Module):
 
     @torch.no_grad()
     def resample_(self, seed: int = None):
-        """Optionally resample all z's in-place (e.g., for ablations)."""
+        Optionally resample all z's in-place (e.g., for ablations).
         self.z_table.copy_(torch.randn_like(self.z_table))
 
     def forward(self, idx: torch.Tensor) -> torch.Tensor:
-        """
+        
         idx: LongTensor of participant ids with arbitrary shape, e.g. (B,) or (B,T).
         Returns z with the same leading shape + (z_dim,).
-        """
+        
         # ensure long dtype for indexing
         idx = idx.long()
         z = self.z_table.index_select(0, idx.reshape(-1))
-        return z.view(*idx.shape, self.z_table.size(1))
+        return z.view(*idx.shape, self.z_table.size(1))"""
+
+class LookupEncoderZ(nn.Module):
+    """
+    Learnable per-participant z using nn.Embedding.
+    """
+    def __init__(self, n_participants: int, z_dim: int):
+        super().__init__()
+        self.embed = nn.Embedding(n_participants, z_dim)
+        nn.init.normal_(self.embed.weight, mean=0.0, std=1.0)
+
+    def forward(self, idx: torch.Tensor) -> torch.Tensor:
+        idx = idx.long().view(-1)                 # (B,)
+        return self.embed(idx)
 
 class Decoder(nn.Module):
     def __init__(self, in_dim, z_dim, hid=hidden_dim, A=2):
         super().__init__()
-        self.rnn   = nn.GRU(in_dim+z_dim, hid, batch_first=True)
+        #self.rnn   = nn.GRU(in_dim+z_dim, hid, batch_first=True)
+        self.rnn   = nn.GRU(in_dim, hid, batch_first=True)
         self.lin   = nn.Linear(hid, A)
         self.z2h0  = nn.Linear(z_dim, hid)
         self.z20_mlp = nn.Sequential(nn.Linear(z_dim,hid), nn.ReLU(),
@@ -93,30 +107,36 @@ class Decoder(nn.Module):
                                  nn.Linear(hid,hid),    nn.ReLU())
         self.z_lin = nn.Linear(hid,hid)
 
-        def forward(self, seq, z, hidden=None, ID_test=False):
-            """
-            seq: (B, T, in_dim)
-            z:   (B, z_dim)
-            hidden: optional previous hidden state (1, B, hid)
-            """
+    def forward(self, seq, z, hidden=None, ID_test=False):
+        """
+        seq: (B, T, in_dim)
+        z:   (B, z_dim)
+        hidden: optional previous hidden state (1, B, hid)
+        """
 
-            if ID_test:
-                if z.dim() > 2:
-                    z = z.view(z.size(0), -1)  # flatten (B, 1, 1, zdim) -> (B, zdim)
-                if z.dim() == 1:
-                    z = z.unsqueeze(0)        # (zdim,) -> (1, zdim)
+        if ID_test:
+            if z.dim() > 2:
+                z = z.view(z.size(0), -1)  # flatten (B, 1, 1, zdim) -> (B, zdim)
+            if z.dim() == 1:
+                z = z.unsqueeze(0)        # (zdim,) -> (1, zdim)
 
-            if hidden is None:
-                hidden = self.z2h0(z).unsqueeze(0)  # initialize hidden state from z
+        if hidden is None:
+            hidden = self.z2h0(z).unsqueeze(0).contiguous().to(seq.device)  # initialize hidden state from z
 
-            # Repeat z across time steps
-            zexp = z.unsqueeze(1).expand(-1, seq.size(1), -1)
-            rnn_input = torch.cat([seq, zexp], -1)
 
-            out, hidden = self.rnn(rnn_input, hidden)
-            logits = self.lin(out)
+        # Repeat z across time steps
+        zexp = z.unsqueeze(1).expand(-1, seq.size(1), -1)
+        #rnn_input = torch.cat([seq, zexp], -1)
+        rnn_input = seq
 
-            return logits, hidden
+        if torch.isnan(rnn_input).any() or torch.isinf(rnn_input).any():
+            print("⚠️ NaNs or Infs in rnn_input!")
+        if torch.isnan(hidden).any() or torch.isinf(hidden).any():
+            print("⚠️ NaNs or Infs in hidden state!")
+        out, hidden = self.rnn(rnn_input, hidden)
+        logits = self.lin(out)
+
+        return logits, hidden
         
     """def forward(self, seq, z, ID_test=False):
         if ID_test:
@@ -184,21 +204,37 @@ class LatentRNN_secondstep(nn.Module):
 
         # optional h0 export
         h0_ = self.decoder.z2h0(z)  # (B,H)
+        logits, hidden = self.decoder(blocks.squeeze(1), z)
+        return logits.unsqueeze(1), mu, lv, z, h0_
 
-        outs = [self.decoder(blocks[:, b], z) for b in range(blocks.size(1))]
-        return torch.stack(outs, dim=1), mu, lv, z, h0_
+        #logits_list = []
+        #hidden_list = []
+        #for b in range(blocks.size(1)):
+        #    logits_b, hidden_b = self.decoder(blocks[:, b], z)
+        #    logits_list.append(logits_b)
+        #    hidden_list.append(hidden_b)
+        #hidden = torch.stack(hidden_list, dim=1) # in case I want access to this
+        #return torch.stack(logits_list, dim=1), mu, lv, z, h0_
     
 class LatentRNNz(nn.Module):
-    def __init__(self, encoder, z_dim=3, in_dim=2, hid=hidden_dim, A=2):
+    def __init__(self, encoder, z_dim=3, in_dim=2, hid=hidden_dim, A=2, block_structure=True):
         super().__init__()
         self.encoder = encoder
         self.decoder = Decoder(in_dim, z_dim, hid, A)
+        self.block_structure = block_structure
     def forward(self, xenc, blocks):            # blocks: (B,Bk,T,2)
+        
         z  = self.encoder(xenc)
         #print(f"[{self.name}] mu shape: {mu.shape}, lv shape: {lv.shape}, z shape: {z.shape}")
         h0_ = self.decoder.z2h0(z)          # (B,H) - just for usage outside of RNN
-        outs = [ self.decoder(blocks[:,b], z) for b in range(blocks.size(1)) ]
-        return torch.stack(outs,1), z, h0_
+        if self.block_structure:    
+            outs = [ self.decoder(blocks[:,b], z) for b in range(blocks.size(1)) ]
+            return torch.stack(outs,1), z, h0_
+        else:
+            logits, hidden = self.decoder(blocks, z) #not sure about hidden
+            return logits, hidden, h0_, z
+
+
     
 class LatentRNN_nocat(nn.Module):
     def __init__(self, encoder, z_dim=3, in_dim=2, hid=hidden_dim, A=2):
@@ -216,8 +252,8 @@ class LatentRNN_nocat(nn.Module):
 class AblatedDecoder(nn.Module):
     def __init__(self, in_dim, hid=hidden_dim, A=2):
         super().__init__()
-        self.h0 = nn.Parameter(torch.zeros(1,1,hid))
-        #self.register_buffer('h0', torch.zeros(1, 1, hid))
+        #self.h0 = nn.Parameter(torch.zeros(1,1,hid))
+        self.register_buffer('h0', torch.zeros(1, 1, hid))
         self.rnn= nn.GRU(in_dim, hid, batch_first=True)
         self.lin= nn.Linear(hid,A)
 
@@ -228,25 +264,28 @@ class AblatedDecoder(nn.Module):
         logits=self.lin(out)
         return logits, hidden_out, out"""
 
-    def forward(self, seq):
-        h0 = self.h0.expand(1, seq.size(0), -1).contiguous()
-        #h0 = self.h0
-        out, hid = self.rnn(seq, h0)
+    def forward(self, seq, h0=None):
+        if h0 is None:
+            h0 = self.h0.expand(1, seq.size(0), -1).contiguous()
+            h0 = h0.to(seq.device)
+        #h0 = self.h0            
+        out, hid = self.rnn(seq, h0) #might have to expand this as well
         return self.lin(out), hid, out
     
 
 class AblatedRNN(nn.Module):
     def __init__(self, in_dim=2, hid=hidden_dim, A=2, block_structure = True):
         super().__init__()
+        self.in_dim = in_dim
         self.dec = AblatedDecoder(in_dim,hid,A)
         self.block_structure = block_structure
-    def forward(self, blocks):
+    def forward(self, blocks, h0=None):
         if self.block_structure:
             out_list = [ self.dec(blocks[:,b]) for b in range(blocks.size(1)) ]
             logits, final_hid, hidden_tr = zip(*out_list)
             return torch.stack(logits,1), torch.stack(final_hid, 1).squeeze(0), torch.stack(hidden_tr, 1)
         else:
-            logits, final_hid, hidden_tr = self.dec(blocks)
+            logits, final_hid, hidden_tr = self.dec(blocks, h0=h0)
             return logits, final_hid, hidden_tr
          
         
@@ -283,7 +322,7 @@ class IDRNN(nn.Module):
         B, B_blk, T, in_dim = blocks_tensor.shape
         x = blocks_tensor.view(B * B_blk, T, in_dim)  # flatten blocks
 
-        out, _ = self.block_encoder(x)  # (B*B_blk, T, hid)
+        out, _ = self.block_encoder(x)  # (B*B_blk, T, hid) --> am I not putting all participants together here?
         
         if return_per_timestep:
             h = out.view(B, B_blk, T, -1)         # (B, B_blk, T, hid)
@@ -315,6 +354,7 @@ class IDRNN(nn.Module):
 nr_epochs = 60
 
 def gaussian_nll_point(mu, logvar, z_T):
+
     var = logvar.exp()
     return 0.5 * (((z_T - mu)**2) / (var + 1e-8) + logvar).sum(-1).mean()
 
@@ -331,7 +371,7 @@ def elbo_loss(logits, targets, mu, lv, beta=0.5):
 
 def elbo_lossZ(logits, targets):
     B,Bk,T,A = logits.shape
-    nll = F.cross_entropy(logits.view(-1,A), targets.long().view(-1), reduction='mean')
+    nll = F.cross_entropy(logits.reshape(-1,A), targets.long().reshape(-1), reduction='mean')
     return nll, nll.detach()
 
 def train_latentrnn(model, xenc, blocks, y, epochs=nr_epochs, lr=1e-3):
@@ -352,7 +392,225 @@ def train_latentrnn(model, xenc, blocks, y, epochs=nr_epochs, lr=1e-3):
         #val_elbos.append(val_loss)
     return model, mu, lv, train_elbos, val_elbos
 
-def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, epochs=nr_epochs, patience = 300, lr=1e-3):
+
+def train_latentrnn_noblocks(
+    model: nn.Module,
+    ids_train: torch.Tensor,           # (B,)
+    X_train: torch.Tensor,             # (B, T, in_dim)
+    y_onehot: torch.Tensor,            # (B, T, A) one-hot
+    p_target: torch.Tensor = None,     # (B, T) prob(arm0), optional
+    epochs: int = 5000,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    device: torch.device = torch.device("cpu")
+):
+    model = model.to(device)
+    ids_train = ids_train.to(device)
+    X_train = X_train.to(device)
+    y_onehot = y_onehot.to(device)
+    y_train = torch.argmax(y_onehot, dim=-1).long()          # (B, T)
+
+    train_losses = []
+    kl_vals = []
+    best_kl = float('inf')
+    best_epoch = None
+    best_state = None
+    pA_per_epoch = {}
+
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    for ep in range(1, epochs + 1):
+        model.train()
+        opt.zero_grad()
+
+        logits, hidden, h0, z = model(ids_train, X_train)            # logits: (B,T,A)
+        nll = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            y_train.reshape(-1),
+            reduction='mean'
+        )
+        nll.backward()
+        opt.step()
+        train_losses.append(nll.item())
+
+        # KL monitoring (optional)
+        if p_target is not None:
+            model.eval()
+            with torch.no_grad():
+                p_model = F.softmax(logits, dim=-1)[:, :, 0]   # prob(arm 0)
+                kl = compute_kl_divergence_bernoulli(p_target.to(device), p_model)
+                kl_vals.append(kl)
+
+                if kl < best_kl:
+                    best_kl = kl
+                    best_epoch = ep
+                    best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+        if ep % 100 == 0:
+            if p_target is not None:
+                print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}  KL {kl:.4f}")
+            else:
+                print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}")
+
+    # fallback: if no KL tracked, keep last state
+    if best_state is None:
+        best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        best_epoch = epochs
+        best_kl = float('nan')
+
+    model.load_state_dict(best_state)
+    model.eval()
+    with torch.no_grad():
+        logits_best, hidden_best, h0_best, z_best = model(ids_train, X_train)
+        pA_best = F.softmax(logits_best, dim=-1)              # (B,T,A)
+        pA_per_epoch[str(best_epoch)] = pA_best
+
+    training_dict = {
+        "predictions": pA_best,
+        "weights": best_state,
+        "best_model": model,
+        "best_epoch": best_epoch,
+        "best_kl": best_kl,
+        "z": z_best,
+        "h0": h0_best
+    }
+
+    return model, train_losses, kl_vals, pA_per_epoch, training_dict
+
+def train_latentrnn_noblocks_palminteri(
+    model: nn.Module,
+    ids_train: torch.Tensor,           # (B,)
+    X_train: torch.Tensor,             # (B, T, in_dim)
+    y_onehot: torch.Tensor,            # (B, T, A) one-hot
+    ids_val: torch.Tensor, 
+    X_val: torch.Tensor,
+    y_val_onehot: torch.Tensor,
+    epochs: int = 5000,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    device: torch.device = torch.device("cpu")
+):
+    model = model.to(device)
+    ids_train = ids_train.to(device)
+    X_train = X_train.to(device)
+    y_onehot = y_onehot.to(device)
+    #y_train = torch.argmax(y_onehot, dim=-1).long()          # (B, T)
+    y_train = y_onehot #just in sloutsky case
+
+    ids_val = ids_val.to(device)
+    X_val = X_val.to(device)
+    y_val_onehot = y_val_onehot.to(device)
+    #y_val = torch.argmax(y_val_onehot, dim=-1).long()          # (B, T)
+    y_val = y_val_onehot # just in sloutsky case
+
+    train_losses = []
+    val_losses = []
+    best_val_loss = float('inf')
+    best_epoch = None
+    best_state = None
+    pA_per_epoch = {}
+    accuracy_dict = {}
+    val_accuracy_dict = {}
+    best_val_acc = 0
+
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    for ep in range(1, epochs + 1):
+        model.train()
+        opt.zero_grad()
+
+        logits, hidden, h0, z = model(ids_train, X_train)            # logits: (B,T,A)
+        if ep == 1:
+            print(f"shape logits: {logits.shape}")
+            print(f"shape logits after reshape: {logits.reshape(-1, logits.size(-1)).shape}")
+            print(f"shape y_train: {y_train.shape}")
+            print(f"shape y_train after reshape: {y_train.reshape(-1).shape}")
+        nll = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            y_train.reshape(-1).long(),
+            reduction='mean'
+        )
+        nll.backward()
+        opt.step()
+        #probs = F.softmax(logits, dim=-1)
+        predictions = torch.argmax(logits, dim=-1)
+        #flatten
+        predictions_flat = predictions.reshape(-1)
+        y_flat = y_train.reshape(-1)
+        total = y_flat.numel()
+        #acc
+        train_acc = torch.sum(predictions_flat == y_flat)
+        final_train_acc = (train_acc/total).item()
+        train_losses.append(nll.item())
+        accuracy_dict[ep] = final_train_acc
+
+    # accuracy monitoring 
+        model.eval()
+        with torch.no_grad():
+            logits_val, hidden_val, h0_val, z_val = model(ids_val, X_val)
+            nll_val = F.cross_entropy(
+            logits_val.reshape(-1, logits_val.size(-1)),
+            y_val.reshape(-1).long(),
+            reduction='mean'
+            )
+            val_losses.append(nll_val.item())
+
+            #probs = F.softmax(logits, dim=-1)
+            predictions_val = torch.argmax(logits_val, dim=-1)
+            #flatten
+            predictions_flat_val = predictions_val.reshape(-1)
+            y_val_flat = y_val.reshape(-1)
+            total_val = y_val_flat.numel()
+            #acc
+            val_acc = torch.sum(predictions_flat_val == y_val_flat)
+            final_val_acc = (val_acc/total_val).item()
+            val_accuracy_dict[ep] = final_val_acc
+
+            if final_val_acc > best_val_acc:
+                best_val_acc = final_val_acc
+                z_val_best = z_val
+                best_epoch = ep
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                
+
+        if ep % 100 == 0:
+            print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}, train_acc: {final_train_acc}, val_acc: {final_val_acc}, val_loss {nll_val.item():.4f}")
+
+    
+    model.load_state_dict(best_state)
+    model.eval()
+    with torch.no_grad():
+        logits_best, hidden_best, h0_best, z_best = model(ids_train, X_train)
+        pA_best = F.softmax(logits_best, dim=-1)              # (B,T,A)
+        pA_per_epoch[str(best_epoch)] = pA_best
+
+    training_dict = {
+        "predictions": pA_best,
+        "weights": best_state,
+        "best_model": model,
+        "best_epoch": best_epoch, #ep #best_epoch
+        "best_val_loss": best_val_loss,
+        "z": z_best,
+        "z_val": z_val_best,
+        "h0": h0_best,
+        "best_val_acc": best_val_acc
+    }
+    print(f"best validation accuracy: {best_val_acc} in epoch: {best_epoch}")
+
+    return model, train_losses, val_losses, pA_per_epoch, training_dict
+
+@torch.no_grad()
+def extract_latents(model, xenc):
+    """
+    xenc: Tensor of shape (B, Bk, T, in_dim)
+    Returns:
+        mu: (B, z_dim) participant-specific latent embeddings
+    """
+    model.eval()
+    mu, logvar = model.encoder(xenc, return_per_timestep=False)
+    return mu.cpu().numpy()
+
+def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, epochs=nr_epochs, patience = 300, lr=1e-3):
     #print(f"x_enc shape: {xenc.shape}, blocks shape: {blocks.shape}, y shape: {y.shape}")
     #xenc input must have shape (B, B_blk, T, in_dim)
     train_elbos = []
@@ -360,12 +618,17 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, epo
     opt = torch.optim.Adam(model.parameters(), lr)
     best_val_loss = float('inf')
     epochs_no_improve = 0
+    kl_vals = []
+    best_kl = float('inf')
+    best_epoch = None
+    best_state = None
+    pA_per_epoch = {}
     # freeze decoder
     for p in model.decoder.parameters():
         assert not p.requires_grad, "Decoder parameters should be frozen before training"
 
     for ep in range(1,epochs+1):
-        model.train()
+        """model.train()
         logits, mu, lv, z, h0_ = model(xenc, blocks, sample_z=False) # two times x data for modularity 
         #(other architectures need two arguments here, one for position encoding, one for actual input. Here we just give input twice)
         policy_loss, nll = elbo_lossZ(logits, y)
@@ -375,7 +638,27 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, epo
         loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
         loss.backward()
         opt.step()
+        opt.zero_grad()"""
+        # implementing random prefixes to prepare model for causal structure at test time
+        model.train()
         opt.zero_grad()
+
+        # randomly pick a prefix length to simulate causal training
+        max_len = blocks.size(2)
+        prefix_len = np.random.randint(5, max_len+1)  # random length
+        blocks_prefix = blocks[:, :, :prefix_len, :]
+        xenc_prefix = xenc[:, :, :prefix_len, :]
+        y_prefix = y[:, :, :prefix_len]
+        p_target_prefix = p_target[:,:prefix_len]
+
+        logits, mu, lv, z, h0_ = model(xenc_prefix, blocks_prefix, sample_z=False)
+        policy_loss, nll = elbo_lossZ(logits, y_prefix)
+
+        lambda_post, lambda_pol = 1.0, 1.0 #try setting lambda pol to 0 in order to only weigh z in training
+        loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
+        loss.backward()
+        opt.step()
+
         train_elbos.append(loss.item())
 
         model.eval()
@@ -384,13 +667,29 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, epo
         val_loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, val_policy_loss)
         val_elbos.append(val_loss.item())
 
+        # KL monitoring (optional)
+        if p_target is not None:
+            model.eval()
+            with torch.no_grad():
+                p_model = F.softmax(logits, dim=-1).squeeze(1)[:, :, 0]   # prob(arm 0)
+                #print(f"shape pA_model: {p_model.shape}")
+                #print(f"shape pA_target: {p_target_prefix.shape}")
+                kl = compute_kl_divergence_bernoulli(p_target_prefix.to(device), p_model)
+                kl_vals.append(kl)
+
+                if kl < best_kl:
+                    best_kl = kl
+                    best_epoch = ep
+                    best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                    best_mu = mu
+                    best_lv = lv
+
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
             epochs_no_improve = 0
-            best_mu = mu
-            best_lv = lv
+            
         else:
             epochs_no_improve += 1
 
@@ -401,9 +700,158 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, epo
             #print(f"[{model.name}] Early stopping at epoch {ep} (no improvement for {patience} epochs)")
             #break
 
-    model.load_state_dict(best_model_state)
+    model.load_state_dict(best_state)
+    model.eval()
+    with torch.no_grad():
+        logits_best, mu_best, lv_best, z_best, h0_best = model(xenc, blocks, sample_z=False)
+        pA_best = F.softmax(logits_best, dim=-1).squeeze(1)[:, :, 0]              # (B,T,A)
+        pA_per_epoch[str(best_epoch)] = pA_best
+
+    training_dict = {
+        "predictions": pA_best,
+        "weights": best_state,
+        "best_model": model,
+        "best_epoch": best_epoch,
+        "best_kl": best_kl,
+        "z": mu_best,
+        "h0": h0_best
+    }
+
         #val_elbos.append(val_loss)
-    return model, best_mu, best_lv, train_elbos, val_elbos
+    return model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_per_epoch
+
+def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val, y_val, z_val_lookup, epochs=nr_epochs, patience = 300, lr=1e-3):
+    #print(f"x_enc shape: {xenc.shape}, blocks shape: {blocks.shape}, y shape: {y.shape}")
+    #xenc input must have shape (B, B_blk, T, in_dim)
+    train_elbos = []
+    val_elbos = []
+    opt = torch.optim.Adam(model.parameters(), lr)
+    best_val_loss = float('inf')
+    epochs_no_improve = 0
+    kl_vals = []
+    best_kl = float('inf')
+    best_epoch = None
+    best_state = None
+    pA_per_epoch = {}
+    accuracy_dict = {}
+    val_accuracy_dict = {}
+    val_acc_history = []
+    best_val_acc = 0
+    model_state_dict = {}
+    # freeze decoder
+    for p in model.decoder.parameters():
+        assert not p.requires_grad, "Decoder parameters should be frozen before training"
+
+    for ep in range(1,epochs+1):
+        """model.train()
+        logits, mu, lv, z, h0_ = model(xenc, blocks, sample_z=False) # two times x data for modularity 
+        #(other architectures need two arguments here, one for position encoding, one for actual input. Here we just give input twice)
+        policy_loss, nll = elbo_lossZ(logits, y)
+        #policy_loss.backward(); opt.step()
+        
+        lambda_post, lambda_pol = 1.0, 1.0 #try setting lambda pol to 0 in order to only weigh z in training
+        loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
+        loss.backward()
+        opt.step()
+        opt.zero_grad()"""
+        # implementing random prefixes to prepare model for causal structure at test time
+        model.train()
+        opt.zero_grad()
+
+        # randomly pick a prefix length to simulate causal training
+        max_len = blocks.size(2)
+        prefix_len = np.random.randint(5, max_len+1)  # random length
+        blocks_prefix = blocks[:, :, :prefix_len, :]
+        xenc_prefix = xenc[:, :, :prefix_len, :]
+        y_prefix = y[:, :, :prefix_len]
+        #p_target_prefix = p_target[:,:prefix_len]
+
+        logits, mu, lv, z, h0_ = model(xenc_prefix, blocks_prefix, sample_z=False)
+        policy_loss, nll = elbo_lossZ(logits, y_prefix)
+
+        lambda_post, lambda_pol = 1.0, 1.0 #try setting lambda pol to 0 in order to only weigh z in training
+        loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
+        loss.backward()
+        opt.step()
+        train_elbos.append(loss.item())
+
+        xenc_val_prefix = xenc_val[:, :, :prefix_len, :]
+        yval_prefix = y_val[:, :, :prefix_len]
+
+        model.eval()
+        val_logits, mu_val, lv_val, _, _ = model(xenc_val_prefix, xenc_val_prefix, sample_z=False)
+        val_policy_loss, val_nll = elbo_lossZ(val_logits, yval_prefix)
+        val_loss = step_two_loss(lambda_post, lambda_pol, mu_val, lv_val, z_val_lookup, val_policy_loss)
+        val_elbos.append(val_loss.item())
+            
+        #accuracy tracking
+        #TRAINING
+        predictions = torch.argmax(logits, dim=-1)
+        #flatten
+        predictions_flat = predictions.reshape(-1)
+        y_flat = y_prefix.reshape(-1)
+        total = y_flat.numel()
+        #acc
+        acc = torch.sum(predictions_flat == y_flat)
+        final_acc = (acc/total).item()
+        accuracy_dict[ep] = final_acc
+
+
+        #VALIDATION
+        predictions_val = torch.argmax(val_logits, dim=-1)
+        #flatten
+        predictions_flat_val = predictions_val.reshape(-1)
+        y_val_flat = yval_prefix.reshape(-1)
+        total_val = y_val_flat.numel()
+        #acc
+        val_acc = torch.sum(predictions_flat_val == y_val_flat)
+        final_val_acc = (val_acc/total_val).item()
+        val_accuracy_dict[ep] = final_val_acc
+        val_acc_history.append(final_val_acc)
+        model_state_dict[ep] = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+        if val_loss.item() < best_val_loss:
+            best_val_loss = val_loss.item()
+            
+            epochs_no_improve = 0
+            
+        else:
+            epochs_no_improve += 1
+
+        if ep % 50 == 0:
+            print(f"[{model.name}], epoch {ep:3d},  train loss {loss.item():.3f},  val loss {val_loss.item():.3f},  train_acciracy: {final_acc},  val_accuracy: {final_val_acc}")
+            
+
+        #if epochs_no_improve >= patience:
+            #print(f"[{model.name}] Early stopping at epoch {ep} (no improvement for {patience} epochs)")
+            #break
+
+    #best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+    window = 20
+    smoothed_val_acc = np.convolve(val_acc_history, np.ones(window)/window, mode='valid')
+    best_epoch = np.argmax(smoothed_val_acc) + window // 2
+    best_model_state = model_state_dict[best_epoch]
+    model.load_state_dict(best_model_state)
+    model.eval()
+    with torch.no_grad():
+        logits_best, mu_best, lv_best, z_best, h0_best = model(xenc, blocks, sample_z=False)
+        pA_best = F.softmax(logits_best, dim=-1).squeeze(1)[:, :, 0]              # (B,T,A)
+        pA_per_epoch[str(best_epoch)] = pA_best
+
+    training_dict = {
+        "predictions": pA_best,
+        "weights": best_state,
+        "best_model": model,
+        "best_epoch": best_epoch, #best_epoch, #just last epoch for now
+        "best_kl": best_kl,
+        "z": mu_best,
+        "h0": h0_best,
+        "val_acc": final_val_acc
+    }
+    print(f"best validation accuracy: {val_accuracy_dict[best_epoch]} at epoch {best_epoch}")
+
+        #val_elbos.append(val_loss)
+    return model, mu_best, lv_best, train_elbos, val_elbos, training_dict, pA_per_epoch
 
 
 def train_latentrnn_early_stopping(model, xenc, blocks, y, blocks_val, y_val, 
@@ -639,8 +1087,99 @@ def train_ablated_noblocks(model, X_train, y_train, p_target=None, epochs=5000, 
     model.load_state_dict(best_model_state)
     logits_best_model, _, _ = model(X_train)
     pA_best_model = F.softmax(logits_best_model, dim=-1)
-    pA_per_epoch[str(ep)] = pA_best_model
-    return model, train_elbos, val_elbos, kl_vals, pA_per_epoch
+    pA_per_epoch[str(best_epoch)] = pA_best_model
+    training_dict = {"predictions": pA_best_model,
+            "weights": best_model_state,
+            "best_model": model,
+            "best_epoch": best_epoch,
+            "best_kl": best_kl}
+    return model, train_elbos, val_elbos, kl_vals, pA_per_epoch, training_dict
+
+def train_ablated_noblocks_palminteri(model, X_train, y_train, X_val, y_val, epochs=5000, lr=0.001):
+    train_elbos = []
+    val_elbos = []
+    kl_vals = []
+    best_val_loss = float('inf')
+    best_val_acc = 0
+    #y_train = torch.argmax(y_train, dim=-1)
+    pA_per_epoch = {} # dictionary to store pA predictions for later comparison
+    train_accuracy_dict = {}
+    val_accuracy_dict = {}
+
+    opt = torch.optim.Adam(model.parameters(), lr, weight_decay=1e-4)
+
+    for ep in range(1, epochs + 1):
+        model.train()
+        opt.zero_grad()
+
+        logits, _, _ = model(X_train)  # (B, T, A)
+        nll = F.cross_entropy(logits.view(-1, logits.size(-1)), y_train.view(-1).long())
+        nll.backward()
+        opt.step()
+        train_elbos.append(nll)
+        #print(model.dec.h0.grad)
+
+        ### accuracy ###
+        # Predictions: take argmax over logits
+        preds = logits.view(-1, logits.size(-1)).argmax(dim=-1)
+
+        # Ground truth labels
+        targets = y_train.view(-1).long()
+
+        # Accuracy: compare and compute mean
+        acc = (preds == targets).float().mean().item()
+        train_accuracy_dict[ep] = acc
+
+        """val_loss = val_elbo_ablated(model, X_val, y_val)
+        train_elbos.append(nll.item())
+        val_elbos.append(val_loss)"""
+
+        """if ep % 50 == 0:
+            print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}")"""
+
+        # === Validation loss ===
+        model.eval()
+        with torch.no_grad():
+            logits_val, _, _ = model(X_val)  # (B, T, A)
+            nll_val = F.cross_entropy(logits_val.view(-1, logits_val.size(-1)), y_val.view(-1).long())
+            val_elbos.append(nll_val.item())
+
+            ### accuracy ###
+            # Predictions: take argmax over logits
+            preds_val = logits_val.view(-1, logits_val.size(-1)).argmax(dim=-1)
+
+            # Ground truth labels
+            targets_val = y_val.view(-1).long()
+
+            # Accuracy: compare and compute mean
+            acc_val = (preds_val == targets_val).float().mean().item()
+            val_accuracy_dict[ep] = acc_val
+
+            if acc_val > best_val_acc:
+                best_val_acc = acc_val
+                best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+                best_epoch = ep
+
+            """if nll_val.item() < best_val_loss:
+                best_val_loss = nll_val.item()
+                best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+                best_epoch = ep"""
+            
+            if ep % 100 == 0:
+                print(f"Epoch {ep:3d},  Train loss: {nll.item():.3f},  Train accuracy: {acc}, Validation accuracy: {acc_val}")
+
+    print(f"best validation accuracy: {best_val_acc} at epoch: {best_epoch}")
+    model.load_state_dict(best_model_state)
+    logits_best_model, _, _ = model(X_train)
+    pA_best_model = F.softmax(logits_best_model, dim=-1)
+    pA_per_epoch[str(best_epoch)] = pA_best_model
+    training_dict = {"predictions": pA_best_model,
+            "weights": best_model_state,
+            "best_model": model,
+            "best_epoch": best_epoch,
+            "best_val_loss": best_val_loss,
+            "best_val_acc": best_val_acc}
+    return model, train_elbos, val_elbos, kl_vals, pA_per_epoch, training_dict
 
 def train_ablated_early_stopping(model, blocks, y, Xs_val, Ys_val, epochs=nr_epochs, lr=1e-3, patience=300):
     train_elbos = []
@@ -1146,7 +1685,7 @@ def test_latentrnn_secondstep_causal_2_vectorized(model, blocks, y, N=100, num_a
 
 # Causal Importance-Weighted Test Function (per-timestep z)
 @torch.no_grad()
-def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100, num_actions=2, first_n=None):
+def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100, num_actions=2, first_n=None, id_case = True):
     """
     Args:
         model: LatentRNN_secondstep instance with encoder + frozen decoder
@@ -1175,6 +1714,7 @@ def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100
     #z_samples = z_samples.unsqueeze(2).unsqueeze(3)  # (N, B, 1, 1, z_dim) for broadcasting
     #print(f"z_samples expanded shape: {z_samples.shape}")
     #print(f"z_samples after formatting: {z_samples}")
+    mu_tensor = torch.ones(B, T, z_dim)
     
     for participant_idx in range(B):
         participant_log_likelihood = 0.0
@@ -1189,18 +1729,22 @@ def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100
                 data_up_to_t = block_data[:t]  # (t, in_dim)
                 data_batched = data_up_to_t.unsqueeze(0).unsqueeze(0)  # (1, 1, t, in_dim)
                 
-                # Get posterior parameters at time t
-                mu_t, logvar_t = model.encoder(data_batched, return_per_timestep=True)
-                mu_t = mu_t[0, 0, -1]  # (z_dim,)
-                logvar_t = logvar_t[0, 0, -1]  # (z_dim,)
-                
-                # Sample z from the posterior q(z|x_{1:t})
-                std_t = torch.exp(0.5 * logvar_t)
-                z_samples = mu_t + std_t * torch.randn((N, z_dim), device=device)
+                if id_case:
+                    # Get posterior parameters at time t
+                    mu_t, logvar_t = model.encoder(data_batched, return_per_timestep=True)
+                    mu_t = mu_t[0, 0, -1]  # (z_dim,)
+                    mu_tensor[participant_idx, t-1] = mu_t # append latents to tensor
+                    logvar_t = logvar_t[0, 0, -1]  # (z_dim,)
+                    
+                    # Sample z from the posterior q(z|x_{1:t})
+                    std_t = torch.exp(0.5 * logvar_t)
+                    z_samples = mu_t + std_t * torch.randn((N, z_dim), device=device)
+                else:
+                    z_samples = torch.zeros((N, z_dim), device=device) #torch.ones((N, z_dim), device=device) 
                 
                 # Vectorized decoder - only uses data up to t
                 data_batch = data_up_to_t.unsqueeze(0).expand(N, -1, -1)  # (N, t, in_dim)
-                logits = model.decoder(data_batch, z_samples, ID_test=True)  # (N, t, A)
+                logits,_ = model.decoder(data_batch, z_samples, ID_test=True)  # (N, t, A)
                 log_probs = F.log_softmax(logits[:, -1], dim=-1)  # (N, A)
                 
                 action_t = block_actions[t-1].long()
@@ -1214,7 +1758,7 @@ def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100
         
         log_likelihoods_per_participant[participant_idx] = participant_log_likelihood
     
-    return log_likelihoods_per_participant.mean().item(), log_likelihoods_per_participant
+    return log_likelihoods_per_participant.mean().item(), log_likelihoods_per_participant, mu_tensor
 
 @torch.no_grad()
 def test_latentrnnZones(model, z, blocks, y, N=100, first_n=None):
