@@ -169,10 +169,11 @@ if latent:
         model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN_palminteri(model=latent_secondstep, xenc=xenc_train,
         blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_val, y_val=y_val, z_val_lookup=lookup_z_val, epochs=5000, patience=600, lr=1e-3)
     else:
-        xenc_val = xenc_train
-        y_val    = y_train
+        #think about whether I want to implement test data here too
+        xenc_test = xin_test.unsqueeze(1)
+        y_test    = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
         model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN(model=latent_secondstep, xenc=xenc_train,
-        blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_val, y_val=y_val, p_target= pA, epochs=1300, patience=600, lr=1e-3)
+        blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, epochs=epochs, patience=epochs, lr=1e-3)
 
 else:
     vanilla_nametag = "vanilla"
@@ -305,7 +306,7 @@ if latent:
         print(f"latent tensor with dim {latent_tensor.shape} saved under data/latents_tensor_sloutsky.pt")
     else:
         torch.save(latent_tensor, f"data/latents_tensor{latent_nametag}.pt")
-        torch.save(latent_tensor_train, f"data/latents_tensor{latent_nametag}_sloutsky_traindata.pt")
+        torch.save(latent_tensor_train, f"data/latents_tensor{latent_nametag}_traindata.pt")
         if model_fitting:
 
             model_eval_df.to_csv(f"data/model_eval_df{latent_nametag}.csv", index=False)

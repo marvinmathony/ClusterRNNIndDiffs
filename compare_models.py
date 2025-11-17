@@ -359,6 +359,7 @@ def gaussian_nll_point(mu, logvar, z_T):
     return 0.5 * (((z_T - mu)**2) / (var + 1e-8) + logvar).sum(-1).mean()
 
 def step_two_loss(lambda_post, lambda_pol, mu, logvar, z_T, L_pol):
+    print(f"z shape: {mu.shape}")
     loss = lambda_post * gaussian_nll_point(mu, logvar, z_T) + lambda_pol * L_pol
     return loss 
 
@@ -680,6 +681,10 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
     best_epoch = None
     best_state = None
     pA_per_epoch = {}
+    accuracy_dict = {}
+    val_accuracy_dict = {}
+    val_acc_history = []
+    model_state_dict = {}
     # freeze decoder
     for p in model.decoder.parameters():
         assert not p.requires_grad, "Decoder parameters should be frozen before training"
@@ -708,9 +713,13 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         y_prefix = y[:, :, :prefix_len]
         p_target_prefix = p_target[:,:prefix_len]
 
+        xenc_val_prefix = xenc_val[:, :, :prefix_len, :]
+        yval_prefix = y_val[:, :, :prefix_len]
+
         logits, mu, lv, z, h0_ = model(xenc_prefix, blocks_prefix, sample_z=False)
         policy_loss, nll = elbo_lossZ(logits, y_prefix)
 
+        #think about z and action loss and implementing it step wise
         lambda_post, lambda_pol = 1.0, 1.0 #try setting lambda pol to 0 in order to only weigh z in training
         loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
         loss.backward()
@@ -719,10 +728,22 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         train_elbos.append(loss.item())
 
         model.eval()
-        val_logits, _, _, _, _ = model(xenc_val, xenc_val, sample_z=False)
-        val_policy_loss, val_nll = elbo_lossZ(val_logits, y_val)
+        val_logits, _, _, _, _ = model(xenc_val_prefix, xenc_val_prefix, sample_z=False)
+        val_policy_loss, val_nll = elbo_lossZ(val_logits, yval_prefix)
         val_loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, val_policy_loss)
         val_elbos.append(val_loss.item())
+
+        #accuracy tracking
+        #TRAINING
+        predictions = torch.argmax(logits, dim=-1)
+        #flatten
+        predictions_flat = predictions.reshape(-1)
+        y_flat = y_prefix.reshape(-1)
+        total = y_flat.numel()
+        #acc
+        acc = torch.sum(predictions_flat == y_flat)
+        final_acc = (acc/total).item()
+        accuracy_dict[ep] = final_acc
 
         # KL monitoring (optional)
         if p_target is not None:
@@ -737,27 +758,50 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
                 if kl < best_kl:
                     best_kl = kl
                     best_epoch = ep
-                    best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                    #best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
                     best_mu = mu
                     best_lv = lv
 
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+        #VALIDATION
+        predictions_val = torch.argmax(val_logits, dim=-1)
+        #flatten
+        predictions_flat_val = predictions_val.reshape(-1)
+        y_val_flat = yval_prefix.reshape(-1)
+        total_val = y_val_flat.numel()
+        #acc
+        val_acc = torch.sum(predictions_flat_val == y_val_flat)
+        final_val_acc = (val_acc/total_val).item()
+        val_accuracy_dict[ep] = final_val_acc
+        val_acc_history.append(final_val_acc)
+        model_state_dict[ep] = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+        if val_loss.item() < best_val_loss:
+            best_val_loss = val_loss.item()
+            best_val_loss_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             epochs_no_improve = 0
             
         else:
             epochs_no_improve += 1
 
-        if ep % 50 == 0:
-            print(f"[{model.name}] epoch {ep:3d}  train loss {loss.item():.3f}  val loss {val_loss.item():.3f}")
+        if ep % 100 == 0:
+            print(f"[{model.name}], epoch {ep:3d},  train loss {loss.item():.3f},  val loss {val_loss.item():.3f},  train_acciracy: {final_acc},  val_accuracy: {final_val_acc}")
+            
 
         #if epochs_no_improve >= patience:
             #print(f"[{model.name}] Early stopping at epoch {ep} (no improvement for {patience} epochs)")
             #break
 
-    model.load_state_dict(best_state)
+    #best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+    window = 40
+    smoothed_val_acc = np.convolve(val_acc_history, np.ones(window)/window, mode='valid')
+    best_epoch = np.argmax(smoothed_val_acc) + window // 2
+    best_model_state = model_state_dict[best_epoch]
+    model.load_state_dict(best_model_state)
+
+
+    print(f"best model state at epoch {best_epoch} with acc: {val_accuracy_dict[best_epoch]}")
+    #model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
         logits_best, mu_best, lv_best, z_best, h0_best = model(xenc, blocks, sample_z=False)

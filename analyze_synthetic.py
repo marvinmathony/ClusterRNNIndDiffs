@@ -30,11 +30,11 @@ rewardsTrain = np.load("data/rewards_train.npy")
 rnn_df = pd.read_csv("data/rnn_results.csv")
 pA_rnn = dict(np.load("data/pA_rnn_dict.npz", allow_pickle=True))
 training_dict = np.load("data/training_dict.npy", allow_pickle=True).item()
-latent_tensor = torch.load(f"data/latents_tensor{vanilla_nametag}.pt")
+latent_tensor = torch.load(f"data/latents_tensor{latent_nametag}.pt")
 best_epoch = training_dict["best_epoch"]
 
 if model_fitting:
     model_eval_df = pd.read_csv("data/model_eval_df.csv")
 
 
-plf.plot_latents(dim_reduction="mds", latent_tensor = latent_tensor, avg=True, n_components=2, name="simulation_data", df=None, df_train=None, group_col="game", subject_col = "subid", latent_tensor_train = None)
+plf.plot_latents(dim_reduction="mds", latent_tensor=latent_tensor, avg=False, n_components=2, name="simulation_data", df=None, df_train=None, group_col="game", subject_col = "subid", latent_tensor_train = None)

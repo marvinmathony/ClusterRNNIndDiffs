@@ -946,10 +946,10 @@ def plot_prediction_RNN_RL(p_true, rewards_seq, c, ax, maxTrial=None, title=None
 def plot_latents(dim_reduction, latent_tensor, avg, n_components, name, df=None, df_train=None, group_col="group", subject_col = "sub_across_groups", latent_tensor_train = None):
     if avg:
         latents = latent_tensor.mean(dim=1)
-        title = "average_latents " + name
+        title = "average_latents" + name
     else:
         latents = latent_tensor[:,-1,:] #last latent
-        title = "last_latent " + name
+        title = "last_latent" + name
     if dim_reduction == "tsne":
         # Apply t-SNE
         tsne_avg = TSNE(n_components=n_components, perplexity=10, random_state=42)
