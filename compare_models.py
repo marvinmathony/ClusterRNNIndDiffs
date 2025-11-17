@@ -396,9 +396,13 @@ def train_latentrnn(model, xenc, blocks, y, epochs=nr_epochs, lr=1e-3):
 def train_latentrnn_noblocks(
     model: nn.Module,
     ids_train: torch.Tensor,           # (B,)
+    ids_test: torch.Tensor,
     X_train: torch.Tensor,             # (B, T, in_dim)
     y_onehot: torch.Tensor,            # (B, T, A) one-hot
+    X_test: torch.Tensor,
+    y_test_onehot: torch.Tensor,
     p_target: torch.Tensor = None,     # (B, T) prob(arm0), optional
+    p_test_target: torch.Tensor = None,
     epochs: int = 5000,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
@@ -406,13 +410,22 @@ def train_latentrnn_noblocks(
 ):
     model = model.to(device)
     ids_train = ids_train.to(device)
+    ids_test = ids_test.to(device)
     X_train = X_train.to(device)
+    X_test = X_test.to(device)
     y_onehot = y_onehot.to(device)
     y_train = torch.argmax(y_onehot, dim=-1).long()          # (B, T)
+    y_test_onehot = y_test_onehot.to(device)
+    y_test = torch.argmax(y_test_onehot, dim=-1).long()
 
     train_losses = []
+    test_losses = []
     kl_vals = []
+    kl_test_vals = []
+    accuracy = []
+    test_accuracy = []
     best_kl = float('inf')
+    best_test_kl = float('inf')
     best_epoch = None
     best_state = None
     pA_per_epoch = {}
@@ -432,6 +445,14 @@ def train_latentrnn_noblocks(
         nll.backward()
         opt.step()
         train_losses.append(nll.item())
+        preds = logits.reshape(-1, logits.size(-1)).argmax(dim=-1)
+
+        # Ground truth labels
+        targets = y_train.reshape(-1).long()
+
+        # Accuracy: compare and compute mean
+        acc = (preds == targets).float().mean().item()
+        accuracy.append(acc)
 
         # KL monitoring (optional)
         if p_target is not None:
@@ -445,13 +466,49 @@ def train_latentrnn_noblocks(
                     best_kl = kl
                     best_epoch = ep
                     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        
+        # test 
+        if p_test_target is not None:
+            model.eval()
+            logits_test, hidden_test, h0_test, z_test = model(ids_test, X_test)
+            nll_test = F.cross_entropy(logits_test.reshape(-1, logits_test.size(-1)), y_test.reshape(-1),reduction='mean')
+            test_losses.append(nll_test.item())
+            preds_test = logits_test.reshape(-1, logits_test.size(-1)).argmax(dim=-1)
+
+            # Ground truth labels
+            targets_test = y_test.reshape(-1).long()
+
+            # Accuracy: compare and compute mean
+            acc_test = (preds_test == targets_test).float().mean().item()
+            test_accuracy.append(acc_test)
+            
+            with torch.no_grad():
+                p_model_test = F.softmax(logits_test, dim=-1)[:, :, 0]   # prob(arm 0)
+                kl_test = compute_kl_divergence_bernoulli(p_test_target.to(device), p_model_test)
+                kl_test_vals.append(kl_test)
+
+                if kl_test < best_test_kl:
+                    best_test_kl = kl_test
+                    best_test_epoch_kl = ep
+                    best_test_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
         if ep % 100 == 0:
             if p_target is not None:
-                print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}  KL {kl:.4f}")
+                print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}  KL {kl:.4f}  accuracy {acc}  test loss {nll_test}  test KL {kl_test}  test accuracy {acc_test}")
             else:
                 print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}")
 
+    best_epoch_test_acc = test_accuracy.index(max(test_accuracy))+1
+    best_epoch_test_loss = test_losses.index(min(test_losses))+1
+    best_epoch_train_loss = train_losses.index(min(train_losses))+1
+    best_epoch_acc = accuracy.index(max(accuracy))+1
+
+    print(f"Best epoch kl: {best_epoch}")
+    print(f"Best test kl epoch: {best_test_epoch_kl}")
+    print(f"Best loss epoch: {best_epoch_train_loss}")
+    print(f"Best test loss epoch: {best_epoch_test_loss}")
+    print(f"Best accuracy loss epoch: {best_epoch_acc}")
+    print(f"Best test accuracy loss epoch: {best_epoch_test_acc}")
     # fallback: if no KL tracked, keep last state
     if best_state is None:
         best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
@@ -1025,12 +1082,18 @@ def train_ablated(model, blocks, y, Xs_val, Ys_val, p_target, epochs=nr_epochs, 
     model.load_state_dict(best_model_state)
     return model, train_elbos, val_elbos, kl_vals
 
-def train_ablated_noblocks(model, X_train, y_train, p_target=None, epochs=5000, lr=0.001):
+def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, p_target=None, p_test = None, epochs=5000, lr=0.001):
     train_elbos = []
     val_elbos = []
     kl_vals = []
+    kl_test_vals = []
+    accuracy = []
+    test_accuracy = []
+    test_loss = []
     best_kl = float('inf')
+    best_test_kl = float('inf')
     y_train = torch.argmax(y_train, dim=-1)
+    y_test = torch.argmax(y_test, dim=-1)
     pA_per_epoch = {} # dictionary to store pA predictions for later comparison
 
     opt = torch.optim.Adam(model.parameters(), lr, weight_decay=1e-4)
@@ -1045,7 +1108,7 @@ def train_ablated_noblocks(model, X_train, y_train, p_target=None, epochs=5000, 
         nll.backward()
         opt.step()
         train_elbos.append(nll)
-        print(model.dec.h0.grad)
+        #print(model.dec.h0.grad)
 
         ### accuracy ###
         # Predictions: take argmax over logits
@@ -1056,6 +1119,7 @@ def train_ablated_noblocks(model, X_train, y_train, p_target=None, epochs=5000, 
 
         # Accuracy: compare and compute mean
         acc = (preds == targets).float().mean().item()
+        accuracy.append(acc)
 
         """val_loss = val_elbo_ablated(model, X_val, y_val)
         train_elbos.append(nll.item())
@@ -1076,14 +1140,53 @@ def train_ablated_noblocks(model, X_train, y_train, p_target=None, epochs=5000, 
                 kl = compute_kl_divergence_bernoulli(p_target, p_model)
                 kl_vals.append(kl)
 
+                logits_test, _, _ = model(X_test)  # (B, T, A)
+        
+                nll_test = F.cross_entropy(logits_test.view(-1, logits_test.size(-1)), y_test.view(-1).long())
+                preds_test = logits_test.view(-1, logits_test.size(-1)).argmax(dim=-1)
+
+                # Ground truth labels
+                targets_test = y_test.view(-1).long()
+
+                # Accuracy: compare and compute mean
+                acc_test = (preds_test == targets_test).float().mean().item()
+                test_accuracy.append(acc_test)
+                test_loss.append(nll_test)
+
+                #test kl divergence
+                p_test = p_test.to(device)
+                p_model_test = F.softmax(logits_test, dim=-1)  # (B, T, A)
+                p_model_test = p_model_test[:,:,0]
+                #print("p_target shape:", p_target.shape)
+                #print("p_model  shape:", p_model.shape)
+                kl_test = compute_kl_divergence_bernoulli(p_test, p_model_test)
+                kl_test_vals.append(kl_test)
+
                 if kl < best_kl:
                     best_kl = kl
                     best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
                     best_epoch = ep
+                if kl_test < best_test_kl:
+                    best_test_kl = kl_test
+                    best_model_state_test = {k: v.clone() for k, v in model.state_dict().items()}
+                    best_test_epoch_kl = ep
 
-                print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}  KL {kl:.3f}  accuracy {acc}")
+                if ep % 100 == 0:
+                    print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}  KL {kl:.3f}  accuracy {acc}  test loss {nll_test}  test accuracy {acc_test}  test kl {kl_test}")
 
-    print(f"Best epoch: {best_epoch}")
+    
+    best_epoch_test_acc = test_accuracy.index(max(test_accuracy))+1
+    best_epoch_test_loss = test_loss.index(min(test_loss))+1
+    best_epoch_train_loss = train_elbos.index(min(train_elbos))+1
+    best_epoch_acc = accuracy.index(max(accuracy))+1
+
+    print(f"Best epoch kl: {best_epoch}")
+    print(f"Best test kl epoch: {best_test_epoch_kl}")
+    print(f"Best loss epoch: {best_epoch_train_loss}")
+    print(f"Best test loss epoch: {best_epoch_test_loss}")
+    print(f"Best accuracy loss epoch: {best_epoch_acc}")
+    print(f"Best test accuracy loss epoch: {best_epoch_test_acc}")
+
     model.load_state_dict(best_model_state)
     logits_best_model, _, _ = model(X_train)
     pA_best_model = F.softmax(logits_best_model, dim=-1)

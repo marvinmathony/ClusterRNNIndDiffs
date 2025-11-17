@@ -15,7 +15,7 @@ rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, pHigh=0.7, pLow=0
 np.save("data/rewards_train.npy", rewardsTrain)
 
 true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='discrete_alpha_only',
-                                          Delta_alpha=0.8, nSession=nSession)
+                                          Delta_alpha=0.4, nSession=nSession)
 
 true_param_df = pd.DataFrame(true_param)
 true_param_df.to_csv("data/true_parameter_values.csv", index=False)
@@ -41,6 +41,9 @@ c_test, r_test, pA_test, _, _, df_test, xin_test, choice_one_hot_test, normalize
     phi_list=true_param['phi_list'],
     tau_list=true_param['tau_list']
 )
+print(f"xin_train shape: {xin_train.shape}")
+print(f"choice_one_hot_test shape: {choice_one_hot_test.shape}")
+print(f"choice_one_hot_test: {choice_one_hot_test}")
 
 #save data externally
 df_train.to_csv("data/df_train.csv", index=False)
@@ -53,3 +56,4 @@ np.save('data/choice_one_hot_test.npy', choice_one_hot_test)
 np.save('data/c_test.npy', c_test)
 np.save('data/pA_train.npy', pA)
 np.save('data/pA_test.npy', pA_test)
+np.save('data/c_train.npy', c)

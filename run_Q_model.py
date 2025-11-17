@@ -22,9 +22,10 @@ tf.random.set_seed(seed_value)
 # Parameters and Variables
 sim_nametag = "Katahira_setup"
 latent_nametag = "latentmodel"
-latent = False
+latent = True
 palminteri = False
-sloutsky = True
+sloutsky = False
+model_fitting = False
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)
 flg_on_policy_check = 1 # True # True: do on-policy check
@@ -102,13 +103,17 @@ else:
     c_test = np.load("data/c_test.npy")
     pA = np.load("data/pA_train.npy")
     pA_test = np.load("data/pA_test.npy")
+    c_train = np.load("data/c_train.npy")
+    c_train = torch.from_numpy(c_train).float().to(device)
 
 
 
 # Convert to tensors
 xin_train = torch.from_numpy(xin_train).float().to(device)
 choice_one_hot_train = torch.from_numpy(choice_one_hot_train).float().to(device)
+choice_one_hot_test = torch.from_numpy(choice_one_hot_test).float().to(device)
 pA = torch.from_numpy(pA).float().to(device)
+pA_test = torch.from_numpy(pA_test).float().to(device)
 
 #print(f"xin_train shape: {xin_train.shape}")
 
@@ -118,8 +123,9 @@ c_test = torch.from_numpy(c_test).float().to(device)
 
 
 B, T, in_dim = xin_train.shape
+B_test, T_test, in_dim_test = xin_test.shape
 z_dim = 3
-A = 4
+A = 2
 
 # --- Train RNN ---
 hidden = 10
@@ -127,6 +133,7 @@ epochs = 5000
 if latent:
     
     ids = torch.arange(B)
+    idstest = torch.arange(B_test)
     encoder = LookupEncoderZ(n_participants=B, z_dim=z_dim)
     model = LatentRNNz(encoder=encoder, z_dim=z_dim, in_dim=in_dim, hid=hidden, A=A, block_structure=False).to(device)
     if palminteri or sloutsky:
@@ -135,9 +142,8 @@ if latent:
         model, train_loss, val_loss, pA_dict, training_dict = train_latentrnn_noblocks_palminteri(model=model, ids_train=ids, X_train=xin_train,
         y_onehot=c_train, ids_val=val_ids, X_val=xin_val, y_val_onehot=c_val, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
     else:
-
-        model, train_loss, kl_vals, pA_dict, training_dict = train_latentrnn_noblocks(model=model, ids_train=ids, X_train=xin_train,
-        y_onehot=choice_one_hot_train, p_target=pA, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
+        model, train_loss, kl_vals, pA_dict, training_dict = train_latentrnn_noblocks(model=model, ids_train=ids, ids_test=idstest, X_train=xin_train,
+        y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test, p_target=pA, p_test_target=pA_test, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
     z_lookup = training_dict["z"]
     
     #second step
@@ -145,14 +151,16 @@ if latent:
     frozen_decoder = copy.deepcopy(model.decoder)
     for p in frozen_decoder.parameters():
         p.requires_grad = False
-    latent_secondstep = LatentRNN_secondstep(encoder=encoder_IDRNN, z_dim=z_dim,in_dim=in_dim, hid=hidden, A=4,
+    latent_secondstep = LatentRNN_secondstep(encoder=encoder_IDRNN, z_dim=z_dim,in_dim=in_dim, hid=hidden, A=A,
     decoder=frozen_decoder)
     latent_secondstep.name = "GRU" # "LatentDistillation"
     latent_secondstep.to(device)
     xenc_train = xin_train.unsqueeze(1)                                # (B, 1, T, 4)
     y_train    = torch.argmax(choice_one_hot_train, dim=-1).unsqueeze(1)  # (B, 1, T)
+
     lookup_z   = z_lookup.to(device)
-    
+    #y_test = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
+
     if palminteri or sloutsky:
         z_val_lookup = training_dict["z_val"]
         lookup_z_val = z_val_lookup.to(device)
@@ -177,9 +185,10 @@ else:
         model, xin_train, y_train, xin_val, y_val, epochs = epochs, lr = 1e-3
         )
     else:
-
+        print(f"xin test shape: {xin_test.shape}")
+        print(f"choice one hot test shape: {choice_one_hot_test.shape}")
         model, train_loss, val_loss, kl_loss, pA_rnn_dict, training_dict = train_ablated_noblocks(
-        model, xin_train, choice_one_hot_train, p_target=pA, epochs = epochs, lr = 1e-3
+        model, xin_train, choice_one_hot_train, xin_test, choice_one_hot_test, p_target=pA, p_test=pA_test, epochs = epochs, lr = 1e-3
         )
 # save model
 # Save model configuration for reloading
@@ -266,7 +275,7 @@ model_configs = {
     "Q": {"asymmetric_alpha": False, "forgetting_type": "none", "choice_trace": False},
     "FQ": {"asymmetric_alpha": False, "forgetting_type": "fixed", "choice_trace": True}
 }
-if not sloutsky:
+if model_fitting:
 
     model_eval_Q_df, params_dict, p1_common_dict, p1_ML_dict, p1_MAP_dict = fit.fit_all_models(
         model_configs, df_train, df_test, n_iter=n_fit_iter, fit_ML=False
@@ -297,7 +306,9 @@ if latent:
     else:
         torch.save(latent_tensor, f"data/latents_tensor{latent_nametag}.pt")
         torch.save(latent_tensor_train, f"data/latents_tensor{latent_nametag}_sloutsky_traindata.pt")
-        model_eval_df.to_csv(f"data/model_eval_df{latent_nametag}.csv", index=False)
+        if model_fitting:
+
+            model_eval_df.to_csv(f"data/model_eval_df{latent_nametag}.csv", index=False)
 
     torch.save(save_dict, f"checkpoints/ablated_rnn_best{latent_nametag}.pt")
     torch.save(model.state_dict(), f"checkpoints/ablated_rnn{latent_nametag}.pt")
@@ -313,8 +324,10 @@ else:
         torch.save(latent_tensor, f"data/latents_tensor{vanilla_nametag}_sloutsky.pt")
         torch.save(latent_tensor_train, f"data/latents_tensor{vanilla_nametag}_sloutsky_traindata.pt")
     else:
-        torch.save(latent_tensor, "data/latents_tensor.pt")
-        model_eval_df.to_csv("data/model_eval_df.csv", index=False)
+        torch.save(latent_tensor, f"data/latents_tensor{vanilla_nametag}.pt")
+        if model_fitting:
+
+            model_eval_df.to_csv("data/model_eval_df.csv", index=False)
 
         
     torch.save(save_dict, "checkpoints/ablated_rnn_best.pt")
