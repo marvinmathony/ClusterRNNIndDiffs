@@ -7,6 +7,10 @@ import tensorflow as tf
 import torch
 from compare_models import *
 import copy
+import glob
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("plots", exist_ok=True)
@@ -22,10 +26,11 @@ tf.random.set_seed(seed_value)
 # Parameters and Variables
 sim_nametag = "Katahira_setup"
 latent_nametag = "latentmodel"
-latent = True
+latent = False
 palminteri = False
 sloutsky = False
-model_fitting = False
+model_fitting = True
+animation = True
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)
 flg_on_policy_check = 1 # True # True: do on-policy check
@@ -124,11 +129,11 @@ c_test = torch.from_numpy(c_test).float().to(device)
 
 B, T, in_dim = xin_train.shape
 B_test, T_test, in_dim_test = xin_test.shape
-z_dim = 3
+z_dim = 6
 A = 2
 
 # --- Train RNN ---
-hidden = 10
+hidden = 2
 epochs = 5000
 if latent:
     
@@ -147,7 +152,7 @@ if latent:
     z_lookup = training_dict["z"]
     
     #second step
-    encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=hidden)
+    encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=10)
     frozen_decoder = copy.deepcopy(model.decoder)
     for p in frozen_decoder.parameters():
         p.requires_grad = False
@@ -227,14 +232,15 @@ def compute_rnn_likelihoods_torch(model, test_xin, choice_test, train_xin, choic
                 train_xin = train_xin.unsqueeze(1)
                 if choice_train is not None:
                     choice_train = choice_train.unsqueeze(1)
+                    mean_ll_train, ll_per_participant_train, latent_tensor_train = test_latentrnn_secondstep_causal_posterior_weighting(
+                    model=model, blocks=train_xin, y=choice_train, N=N, id_case=True
+                    )
                 else:
                     latent_tensor_train = None
             mean_ll, ll_per_participant, latent_tensor = test_latentrnn_secondstep_causal_posterior_weighting(
                 model=model, blocks=test_xin, y=choice_test, N=N, id_case=id
             )
-            mean_ll_train, ll_per_participant_train, latent_tensor_train = test_latentrnn_secondstep_causal_posterior_weighting(
-                model=model, blocks=train_xin, y=choice_train, N=N, id_case=True
-            )
+            
 
             #probably do linear probe here - or in the test function
             print(f"ll_per_participant: {ll_per_participant}")
@@ -243,7 +249,7 @@ def compute_rnn_likelihoods_torch(model, test_xin, choice_test, train_xin, choic
             rnn_results.append(pd.DataFrame({
                 "session": np.arange(B),
                 "normalized_likelihood": norm_ll.cpu().numpy(),
-                "model": "GRU" #"LatentRNN_causalIW" - change code to implement other names as well
+                "model": "IDRNN" if id else "common_process_RNN"#"LatentRNN_causalIW" - change code to implement other names as well
             }))
             return pd.concat(rnn_results, ignore_index=True), latent_tensor, latent_tensor_train
         else:
@@ -268,8 +274,44 @@ def compute_rnn_likelihoods_torch(model, test_xin, choice_test, train_xin, choic
             }))
             return pd.concat(rnn_results, ignore_index=True), latent_tensor, latent_tensor_train
 
+if animation:
+    checkpoint_files = sorted(glob.glob("checkpoints/*.pt"))
+
+    latent_list = []
+    for ckpt in checkpoint_files:
+        print("Loading:", ckpt)
+        model.load_state_dict(torch.load(ckpt))
+        _, latent_tensor, _ = compute_rnn_likelihoods_torch(model, xin_test, c_test, xin_train, choice_train=c_train, latent=latent, id=True)
+        latents = latent_tensor[:, -1, :].detach().cpu().numpy()
+        latent_list.append(latents)
+    all_latents = np.concatenate(latent_list, axis=0)
+    pca = PCA(n_components=2)
+    pca.fit(all_latents)
+    latent_2d_over_epochs = [pca.transform(lat) for lat in latent_list]
+
+    colors = [0 if i < 100 else 1 for i in range(200)]
+    group_colors = colors
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    def update(frame):
+        ax.clear()
+        xy = latent_2d_over_epochs[frame]
+        ax.scatter(xy[:, 0], xy[:, 1], c=group_colors, cmap="coolwarm")
+        ax.set_title(f"Latent space — Epoch {frame*100}")
+        ax.set_xlabel("PC1")
+        ax.set_ylabel("PC2")
+        ax.grid(True)
+
+    
+
+    anim = FuncAnimation(fig, update, frames=len(latent_2d_over_epochs), interval=400)
+
+    anim.save("plots/latent_evolution_04diff_ID10_common02.gif", writer="pillow")
+    print("Saved latent_evolution.gif")
+
+
 rnn_df, latent_tensor, latent_tensor_train = compute_rnn_likelihoods_torch(model, xin_test, c_test, xin_train, choice_train=c_train, latent=latent, id=True)
-#rnn_no_id, _, _ = compute_rnn_likelihoods_torch(model, xin_test, c_test, xin_train, choice_train=None, latent=latent, id=False)
+rnn_no_id, _, _ = compute_rnn_likelihoods_torch(model, xin_test, c_test, xin_train, choice_train=None, latent=latent, id=False)
 
 # --- Fit Cognitive Models ---
 model_configs = {
@@ -326,9 +368,10 @@ else:
         torch.save(latent_tensor_train, f"data/latents_tensor{vanilla_nametag}_sloutsky_traindata.pt")
     else:
         torch.save(latent_tensor, f"data/latents_tensor{vanilla_nametag}.pt")
+        print(f"latent saved under data/latents_tensor{vanilla_nametag}.pt")
         if model_fitting:
 
-            model_eval_df.to_csv("data/model_eval_df.csv", index=False)
+            model_eval_df.to_csv(f"data/model_eval_df{vanilla_nametag}.csv", index=False)
 
         
     torch.save(save_dict, "checkpoints/ablated_rnn_best.pt")

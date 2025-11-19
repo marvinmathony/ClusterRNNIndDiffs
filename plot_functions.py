@@ -333,8 +333,8 @@ def compare_model_performance(model_eval_df, models, file_id='model_comparison',
 
     # --- Save & show ---
     plt.tight_layout()
-    file_path = os.path.join(save_dir, f"{file_id}.eps")
-    plt.savefig(file_path, format='eps', dpi=300)
+    file_path = os.path.join(save_dir, f"{file_id}.png")
+    plt.savefig(file_path, dpi=300)
     print(f"✅ Figure saved at {file_path}")
     plt.show()
 
@@ -369,8 +369,7 @@ def compare_model_performance_original(model_eval_df, models, file_id='model_com
         'common fit': 'C0',
         'individual fit': 'C3',  # Will be removed from legend if plot_individual_fit=False
         'MAP': 'C2', 
-        'common_process_RNN': 'C1',        # GRU in a prominent color
-        'IDRNN': 'C4', #change names of models in df
+        'GRU': 'C4', 
         'True model': 'lightgray' # True model in a less prominent color
     }
 

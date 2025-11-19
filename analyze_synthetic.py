@@ -15,8 +15,9 @@ from sklearn.linear_model import LogisticRegression
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #latent = True
 latent_nametag = "latentmodel" #loading
-model_fitting = False
+model_fitting = True
 vanilla_nametag = "vanilla"
+latent = True
 
 #### Load Data ####
 # Always available / shared
@@ -30,11 +31,34 @@ rewardsTrain = np.load("data/rewards_train.npy")
 rnn_df = pd.read_csv("data/rnn_results.csv")
 pA_rnn = dict(np.load("data/pA_rnn_dict.npz", allow_pickle=True))
 training_dict = np.load("data/training_dict.npy", allow_pickle=True).item()
-latent_tensor = torch.load(f"data/latents_tensor{latent_nametag}.pt")
+if latent:
+
+    latent_tensor = torch.load(f"data/latents_tensor{latent_nametag}.pt")
+    print(f"loaded latents_tensor{latent_nametag}.pt")
+else:
+    latent_tensor = torch.load(f"data/latents_tensor{vanilla_nametag}.pt")
+    print(f"loaded latents_tensor{vanilla_nametag}.pt")
+
 best_epoch = training_dict["best_epoch"]
 
 if model_fitting:
-    model_eval_df = pd.read_csv("data/model_eval_df.csv")
+    if latent:
+
+        model_eval_df = pd.read_csv(f"data/model_eval_df{latent_nametag}.csv")
+        models = model_eval_df['model'].unique()
+        print(f"models: {models}")
+        plf.compare_model_performance(model_eval_df, models, file_id='model_comparison_z6_com2_ID10', save_dir='./plots/',
+                                ylim=[0.5, 0.7],
+                                plot_individual_ML=False, fig_width=8, x_tick_fontsize=4)
+    else:
+        model_eval_df = pd.read_csv(f"data/model_eval_df{vanilla_nametag}.csv")
+        models = model_eval_df['model'].unique()
+        print(f"models: {models}")
+        plf.compare_model_performance_original(model_eval_df, models, file_id='model_comparison_z6_com2_ID10', save_dir='./plots/',
+                                ylim=[0.5, 0.7],
+                                plot_individual_ML=False, fig_width=8, x_tick_fontsize=4)
+
+    
 
 
 plf.plot_latents(dim_reduction="mds", latent_tensor=latent_tensor, avg=False, n_components=2, name="simulation_data", df=None, df_train=None, group_col="game", subject_col = "subid", latent_tensor_train = None)

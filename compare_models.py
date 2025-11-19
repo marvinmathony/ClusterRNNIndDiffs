@@ -359,7 +359,6 @@ def gaussian_nll_point(mu, logvar, z_T):
     return 0.5 * (((z_T - mu)**2) / (var + 1e-8) + logvar).sum(-1).mean()
 
 def step_two_loss(lambda_post, lambda_pol, mu, logvar, z_T, L_pol):
-    print(f"z shape: {mu.shape}")
     loss = lambda_post * gaussian_nll_point(mu, logvar, z_T) + lambda_pol * L_pol
     return loss 
 
@@ -785,6 +784,8 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
             epochs_no_improve += 1
 
         if ep % 100 == 0:
+            ckpt_path = f"checkpoints/IDRNN_epoch_{ep:04d}.pt"
+            torch.save(model.state_dict(), ckpt_path)
             print(f"[{model.name}], epoch {ep:3d},  train loss {loss.item():.3f},  val loss {val_loss.item():.3f},  train_acciracy: {final_acc},  val_accuracy: {final_val_acc}")
             
 
