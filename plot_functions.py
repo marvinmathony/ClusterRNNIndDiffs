@@ -943,7 +943,11 @@ def plot_prediction_RNN_RL(p_true, rewards_seq, c, ax, maxTrial=None, title=None
 
 
 def plot_latents(dim_reduction, latent_tensor, avg, n_components, name, df=None, df_train=None, group_col="group", subject_col = "sub_across_groups", latent_tensor_train = None):
-    if avg:
+    if "model" in name:
+        latents = torch.from_numpy(latent_tensor) #just to make this work for code below
+        title = "fitted_" + name
+        print("heureka")
+    elif avg:
         latents = latent_tensor.mean(dim=1)
         title = "average_latents" + name
     else:

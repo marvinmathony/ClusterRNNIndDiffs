@@ -1,6 +1,7 @@
-# Ignore data and plot directories
+# Ignore data, checkpoints and plot directories
 data/
 plots/
+checkpoints/
 
 # Python cache files
 __pycache__/

@@ -30,7 +30,7 @@ latent = False
 palminteri = False
 sloutsky = False
 model_fitting = True
-animation = True
+animation = False
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)
 flg_on_policy_check = 1 # True # True: do on-policy check
@@ -320,9 +320,15 @@ model_configs = {
 }
 if model_fitting:
 
-    model_eval_Q_df, params_dict, p1_common_dict, p1_ML_dict, p1_MAP_dict = fit.fit_all_models(
+    model_eval_Q_df, params_dict, p1_common_dict, p1_ML_dict, p1_MAP_dict, q_common_dict = fit.fit_all_models(
         model_configs, df_train, df_test, n_iter=n_fit_iter, fit_ML=False
     )
+    
+    np.savez(f"data/params_dict.npz", **params_dict)
+    print(f"parameter dict saved under data/params_dict.npz ✅")
+
+    np.savez(f"data/q_common_dict.npz", **q_common_dict)
+    print(f"q value dict saved under data/q_common_dict.npz ✅")
 
     print(f"model_eval_Q_df: {model_eval_Q_df}")
     print(f"session_ll_df_test: {session_ll_df_test}")
@@ -353,8 +359,8 @@ if latent:
 
             model_eval_df.to_csv(f"data/model_eval_df{latent_nametag}.csv", index=False)
 
-    torch.save(save_dict, f"checkpoints/ablated_rnn_best{latent_nametag}.pt")
-    torch.save(model.state_dict(), f"checkpoints/ablated_rnn{latent_nametag}.pt")
+    #torch.save(save_dict, f"checkpoints/ablated_rnn_best{latent_nametag}.pt")
+    #torch.save(model.state_dict(), f"checkpoints/ablated_rnn{latent_nametag}.pt")
     np.savez(f"data/pA_rnn_dict{latent_nametag}.npz", **pA_rnn_dict)
     np.save(f"data/training_dict{latent_nametag}.npy", training_dict)
 else:

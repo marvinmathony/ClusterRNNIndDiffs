@@ -109,6 +109,150 @@ from scipy.optimize import minimize
 
 #     return -ll, p1_series
 
+def get_q_values(param, df, model_config, trials = 200):
+    """
+    Q-learning function for computing log-likelihood across all sessions.
+
+    Parameters:
+    - param: Model parameters to estimate.
+    - sessions: Array of session identifiers.
+    - choices: Array of choices made (can include -1 for missed responses).
+    - rewards: Array of rewards received.
+    - context: Array of context identifiers (or None).
+    - model_config: Dictionary specifying the model configuration.
+
+    Returns:
+    - Negative log-likelihood.
+    - p1_series: Probability of choosing option 1 for each trial.
+    """
+    print(f"getting q values of common fit model")
+    # Extract data once
+    sessions = df['session'].values
+    choices  = df['c'].values
+    rewards  = df['r'].values
+    context  = df['context'].values if 'context' in df.columns else None
+
+    # Unique session list
+    unique_sessions = np.unique(sessions)
+    session_to_idx  = {s: i for i, s in enumerate(unique_sessions)}
+
+    # Prepare output array
+    n_sessions = len(unique_sessions)
+    Q_all = np.zeros((n_sessions, 2, trials)) 
+
+    # Extract model configuration
+    asymmetric_alpha = model_config.get("asymmetric_alpha", False)
+    forgetting_type = model_config.get("forgetting_type", "none")
+    choice_trace = model_config.get("choice_trace", False)
+    init_Q_free = model_config.get("init_Q_free", False)  
+
+    
+
+    # Extract parameters
+    idx = 0
+    if init_Q_free:
+        Q_init_0 = param[idx]  
+        idx += 1
+        Q_init_1 = param[idx]  
+        idx += 1
+    else:
+        Q_init_0 = 0.0
+        Q_init_1 = 0.0
+
+    if asymmetric_alpha:
+        alphaP = param[idx]
+        idx += 1
+        alphaN = param[idx]
+        idx += 1
+    else:
+        alpha = param[idx]
+        idx += 1
+
+    if forgetting_type == "free":
+        alphaF = param[idx]
+        idx += 1
+    elif forgetting_type == "fixed":
+        alphaF = alpha if not asymmetric_alpha else (alphaP + alphaN) * 0.5  
+    else:
+        alphaF = 0.0
+
+    beta = param[idx]
+    idx += 1
+
+    if choice_trace:
+        phi = param[idx]
+        idx += 1
+        tau = param[idx]
+        idx += 1
+    else:
+        phi = 0.0
+        tau = 0.0
+
+    # Initialize variables
+    ll = 0
+    p1_series = np.zeros(len(sessions))
+    
+    # loop over participants (sessions)
+    for session in unique_sessions:
+        s_idx = session_to_idx[session]
+        session_indices = np.where(sessions == session)[0]
+        choice = choices[session_indices]
+        reward = rewards[session_indices]
+        context_session = context[session_indices] if context is not None else None        
+
+        T = len(choice)
+        Q = np.zeros((2, T))
+        CT = np.zeros((2, T))  # Choice trace
+        p1 = np.zeros(T)
+
+        Q[0, 0] = Q_init_0
+        Q[1, 0] = Q_init_1
+
+        for t in range(T):
+
+            if t >= len(choice):
+                print(f"Warning: t={t} exceeds choice array length {len(choice)} in session {session}")
+                continue
+            if choice[t] not in [-1, 0, 1]:
+                print(f"Error: Invalid choice value {choice[t]} at t={t} in session {session}")
+                continue
+
+            if t > 0:  
+                if context_session is not None and context_session[t] != context_session[t - 1]:
+                    Q[:, t] = [Q_init_0, Q_init_1]  # Reset Q-values on context change
+                    CT[:, t] = 0  # Reset choice trace on context change  
+
+            # store Q-values *at decision time t* for this trial
+            Q_all[s_idx, :, t] = Q[:, t]
+
+            if choice[t] == -1:  # Skip trials with missed responses
+                if t < T - 1:
+                    Q[:, t + 1] = Q[:, t]  # Carry forward previous Q-values
+                    CT[:, t + 1] = CT[:, t]  # Carry forward previous CT values
+                continue
+
+            # Compute choice probabilities
+            p1[t] = np.exp(beta * Q[0, t] + phi * CT[0, t]) / np.exp(beta * Q[:, t] + phi * CT[:, t]).sum()
+            likelihood = np.clip((choice[t] == 0) * p1[t] + (choice[t] == 1) * (1 - p1[t]), 0.00001, 0.99999)
+            ll += np.log(likelihood)
+
+            # Update Q-values and choice trace for the next trial
+            if t < T - 1:
+                Q[:, t + 1] = (1 - alphaF) * Q[:, t]  # Forgetting term
+                delta = reward[t] - Q[choice[t], t]
+                Q[choice[t], t + 1] = Q[choice[t], t] + (
+                    alphaP if asymmetric_alpha and delta > 0 else
+                    alphaN if asymmetric_alpha else
+                    alpha
+                ) * delta
+
+                # Update choice trace
+                CT[choice[t], t + 1] = CT[choice[t], t] + tau * (1 - CT[choice[t], t])
+                CT[1 - choice[t], t + 1] = CT[1 - choice[t], t] + tau * (0 - CT[1 - choice[t], t])
+
+        p1_series[session_indices] = p1
+
+    return Q_all
 
 
 def qlearning_full(param, sessions, choices, rewards, context, model_config):
@@ -205,7 +349,8 @@ def qlearning_full(param, sessions, choices, rewards, context, model_config):
             if t > 0:  
                 if context_session is not None and context_session[t] != context_session[t - 1]:
                     Q[:, t] = [Q_init_0, Q_init_1]  # Reset Q-values on context change
-                    CT[:, t] = 0  # Reset choice trace on context change    
+                    CT[:, t] = 0  # Reset choice trace on context change  
+
 
             if choice[t] == -1:  # Skip trials with missed responses
                 if t < T - 1:
@@ -845,6 +990,7 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
     p1_common_dict = {}
     p1_ML_dict = {}
     p1_MAP_dict = {}
+    Q_common_dict = {}
 
     for model_name, model_config in model_configs.items():
         print(f"Fitting {model_name}...")
@@ -861,6 +1007,14 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
 
             p1_common_dict[model_name] = p1_common
             params_dict[f"{model_name}_common"] = common_params
+
+            # --- NEW: compute and store Q-values for common fit ---
+            Q_train = get_q_values(common_params, df_train, model_config)
+            Q_test  = get_q_values(common_params, df_test,  model_config)
+            Q_common_dict[model_name] = {
+                "train": Q_train,   # shape (n_sessions, 2, n_train_trials)
+                "test":  Q_test     # shape (n_sessions, 2, n_test_trials)
+            }
 
             # Compute normalized likelihoods for common fit on test data
             print("  Compute results for common fit")
@@ -913,4 +1067,4 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
     # Combine results for all models into a single DataFrame
     final_results = pd.concat(model_results_dict.values(), ignore_index=True) if model_results_dict else pd.DataFrame()
 
-    return final_results, params_dict, p1_common_dict, p1_ML_dict, p1_MAP_dict
+    return final_results, params_dict, p1_common_dict, p1_ML_dict, p1_MAP_dict, Q_common_dict
