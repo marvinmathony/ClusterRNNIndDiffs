@@ -560,6 +560,8 @@ def generate_parameter_lists(true_model, ind_diff_type, Delta_alpha=None, nSessi
             if Delta_alpha is None:
                 raise ValueError("Delta_alpha must be provided for discrete_alpha_only.")
             alphaP_list = [0.5 - Delta_alpha * 0.5] * (nSession // 2) + [0.5 + Delta_alpha * 0.5] * (nSession // 2)
+        elif ind_diff_type == 'uniform':
+            alphaP_list = np.random.uniform(0.1, 0.9, nSession).tolist()
         else:
             raise ValueError(f"Unknown ind_diff_type: {ind_diff_type}")
         

@@ -942,7 +942,7 @@ def plot_prediction_RNN_RL(p_true, rewards_seq, c, ax, maxTrial=None, title=None
     ax.legend(handles, labels, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0)
 
 
-def plot_latents(dim_reduction, latent_tensor, avg, n_components, name, df=None, df_train=None, group_col="group", subject_col = "sub_across_groups", latent_tensor_train = None):
+def plot_latents(dim_reduction, latent_tensor, avg, n_components, name, df=None, df_train=None, group_col="group", subject_col = "sub_across_groups", latent_tensor_train = None, param_array = None):
     if "model" in name:
         latents = torch.from_numpy(latent_tensor) #just to make this work for code below
         title = "fitted_" + name
@@ -978,10 +978,11 @@ def plot_latents(dim_reduction, latent_tensor, avg, n_components, name, df=None,
         
         colors = [color_map[val] for val in group_vals]
     
-    else:
-        n_participants = latents_reduced.shape[0]
+    elif param_array is not None:
+        """n_participants = latents_reduced.shape[0]
         assert n_participants >= 200, "Expected at least 200 participants"
-        colors = [0 if i < 100 else 1 for i in range(n_participants)]
+        colors = [0 if i < 100 else 1 for i in range(n_participants)]"""
+        colors = param_array
     
     if df_train is not None:
         dftrain_unique = df_train.drop_duplicates(subset=subject_col)

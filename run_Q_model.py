@@ -29,7 +29,7 @@ latent_nametag = "latentmodel"
 latent = False
 palminteri = False
 sloutsky = False
-model_fitting = True
+model_fitting = False
 animation = False
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)

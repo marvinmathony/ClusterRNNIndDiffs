@@ -16,14 +16,16 @@ from sklearn.manifold import TSNE, MDS
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #latent = True
 latent_nametag = "latentmodel" #loading
-model_fitting = True
+model_fitting = False
 vanilla_nametag = "vanilla"
-latent = True
+latent = False
+analyze_Q = False
 
 #### Load Data ####
 # Always available / shared
 df_train = pd.read_csv("data/df_train.csv")
 df_test = pd.read_csv("data/df_test.csv")
+parameter_df = pd.read_csv("data/true_parameter_values.csv")
 
 p1_common_dict = dict(np.load("data/p1_common_dict.npz", allow_pickle=True))
 rewardsTrain = np.load("data/rewards_train.npy")
@@ -43,7 +45,7 @@ else:
 
 best_epoch = training_dict["best_epoch"]
 
-if model_fitting:
+if analyze_Q:
     npz = np.load("data/q_common_dict.npz", allow_pickle=True)
     q_values_dict = {key: npz[key].item() for key in npz.files}
     for key, value in q_values_dict.items():
@@ -103,6 +105,11 @@ if model_fitting:
 
     print("plot saved under plots/dim_reduction_FQ_values.png")
 
+else:
+    params = parameter_df["alphaP_list"].values
+    plf.plot_latents(dim_reduction="mds", latent_tensor = latent_tensor, avg=True, n_components=2, name="simulation_vanilla_uniform", df=df_test, param_array = params)
+
+
     """participants = sorted(fq_common.keys()) 
     param_array = np.vstack([q_common[p] for p in participants])
     print(param_array.shape)"""
@@ -116,12 +123,12 @@ if model_fitting:
                                 ylim=[0.5, 0.7],
                                 plot_individual_ML=False, fig_width=8, x_tick_fontsize=4)
     else:
-        model_eval_df = pd.read_csv(f"data/model_eval_df{vanilla_nametag}.csv")
+        """model_eval_df = pd.read_csv(f"data/model_eval_df{vanilla_nametag}.csv")
         models = model_eval_df['model'].unique()
         print(f"models: {models}")
         plf.compare_model_performance_original(model_eval_df, models, file_id='model_comparison_z6_com2_ID10', save_dir='./plots/',
                                 ylim=[0.5, 0.7],
-                                plot_individual_ML=False, fig_width=8, x_tick_fontsize=4)
+                                plot_individual_ML=False, fig_width=8, x_tick_fontsize=4)"""
 
     
 
