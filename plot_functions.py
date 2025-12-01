@@ -241,6 +241,7 @@ def compare_model_performance(model_eval_df, models, file_id='model_comparison',
     aggregated_data = {}
     for group, sub_models in model_groups.items():
         for sub_model in sub_models:
+            print(f"sub model: {sub_model}")
             if sub_model in model_eval_df['model'].values:
                 nl_values = model_eval_df[model_eval_df['model'] == sub_model] \
                                 .sort_values(by='session')['normalized_likelihood'].values
@@ -257,6 +258,7 @@ def compare_model_performance(model_eval_df, models, file_id='model_comparison',
 
     positions, labels, significant_models = [], [], []
     current_position = 0
+    model_nlls = {}
 
     # --- Plot each group ---
     for group, sub_models in model_groups.items():
@@ -273,6 +275,7 @@ def compare_model_performance(model_eval_df, models, file_id='model_comparison',
             nl_values = aggregated_data[group][sub_model]
             mean = np.mean(nl_values)
             error = np.std(nl_values) / np.sqrt(len(nl_values))
+            model_nlls[sub_model] = nl_values
 
             color = (
                 color_mapping['common fit'] if 'common fit' in sub_model else
@@ -301,6 +304,31 @@ def compare_model_performance(model_eval_df, models, file_id='model_comparison',
             positions.append(np.mean(sub_positions))
             labels.append(group)
             current_position += 0.5
+
+    # Extract NLL vectors
+    q_common  = np.array(model_nlls["Q (common fit)"])
+    fq_common = np.array(model_nlls["FQ (common fit)"])
+
+    q_map  = np.array(model_nlls["Q (MAP)"])
+    fq_map = np.array(model_nlls["FQ (MAP)"])
+
+    # Paired tests: Q vs FQ
+    t_q, p_q = ttest_rel(q_common, q_map)
+    t_fq, p_fq = ttest_rel(fq_common, fq_map)
+
+    idrnn    = np.array(model_nlls["IDRNN"])
+    common_rnn = np.array(model_nlls["common_process_RNN"])
+
+    t_rnn, p_rnn = ttest_rel(common_rnn, idrnn)
+
+    print("\n📌 IDRNN vs common_process_RNN:")
+    print(f"t = {t_rnn:.4f}, p = {p_rnn}")
+
+    print("📌 Q(common) vs Q(MAP):")
+    print(f"t = {t_q:.4f}, p = {p_q}")
+
+    print("\n📌 FQ(common) vs FQ(MAP):")
+    print(f"t = {t_fq:.4f}, p = {p_fq}")
 
     # --- Axes & labels ---
     ax.set_ylim(ylim[0], ylim[1])
@@ -393,6 +421,7 @@ def compare_model_performance_original(model_eval_df, models, file_id='model_com
     aggregated_data = {}
     for group, sub_models in model_groups.items():
         for sub_model in sub_models:
+            print(f"sub model: {sub_model}")
             if sub_model in model_eval_df['model'].values:
                 nl_values = model_eval_df[model_eval_df['model'] == sub_model].sort_values(by='session')['normalized_likelihood'].values
                 aggregated_data.setdefault(group, {}).setdefault(sub_model, []).extend(nl_values)
@@ -412,6 +441,7 @@ def compare_model_performance_original(model_eval_df, models, file_id='model_com
     labels = []
     current_position = 0
     significant_models = []  # Models significantly worse than GRU
+    model_likelihoods = {}
 
     for group, sub_models in model_groups.items():
         if group == "True model":  # Skip True model from individual plotting
@@ -426,7 +456,7 @@ def compare_model_performance_original(model_eval_df, models, file_id='model_com
                 nl_values = aggregated_data[group][sub_model]
                 mean = np.mean(nl_values)
                 error = np.std(nl_values) / np.sqrt(len(nl_values))
-            
+                
                 color = (
                     color_mapping['common fit'] if 'common fit' in sub_model else
                     color_mapping['individual fit'] if 'individual fit' in sub_model else
@@ -1252,5 +1282,47 @@ def plot_bic_trajectories(latent1, model1_name, latent2, model2_name, max_compon
     print(f"Model 2: mean k = {np.mean(k2):.2f}")
 
     return bics1, bics2, k1, k2
+
+
+def rsa_latents(latents, metric="cosine",title=None, reduction = "avg", plot=True, original_data=False):
+    """
+    latents: tensor (N, T, D)
+    metric: 'euclidean', 'cosine', etc.
+    """
+
+    # collapse time dimension → participant-level embedding
+    if original_data:
+        latents = latents
+        latents = latents.reshape(-1, 1)
+        header = "original parameters"
+    elif reduction == "avg":
+        latents = latents.mean(dim=1)  # (N, D)
+        header = "mean latents"
+    elif reduction == "last":
+        latents = latents[:,-1,:]
+        header = "last latent"
+    else:
+        latents = latents
+        header = "entire latent trajectory"
+
+    # convert to numpy
+    X = latents.cpu().numpy() if not original_data else latents
+
+    # pairwise distances
+    dist_vec = pdist(X, metric=metric)
+    dist_mat = squareform(dist_vec)  # (N, N)
+
+    if plot:
+        plt.figure(figsize=(8, 7))
+        im = plt.imshow(dist_mat, cmap="viridis")
+        plt.colorbar(im, fraction=0.046, pad=0.04)
+        plt.title(f"RSA ({header}) – metric: {metric}")
+        plt.xlabel("Participants")
+        plt.ylabel("Participants")
+        plt.tight_layout()
+        plt.savefig(f"plots/RSA_{title}.png")
+        plt.show()
+
+    return dist_mat
 
 

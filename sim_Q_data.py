@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 from tensorflow.keras.utils import to_categorical
+import random
 
 
 import numpy as np
@@ -12,7 +13,7 @@ import matplotlib.pyplot as plt
 def simulate_Qlearning(
     rewards, seed=1979, n_trials=200, n_sessions=10, 
     alphaP_list=0.5, alphaN_list=0.5, 
-    beta=0.3, alphaF_list=0.0, phi_list=0.0, tau_list=0.0
+    beta=0.3, alphaF_list=0.0, phi_list=0.0, tau_list=0.0, static = False
 ):
     """
     Simulates behavioral data using an Asymmetric Q-learning model with choice trace (CT),
@@ -82,7 +83,7 @@ def simulate_Qlearning(
             c[session, t] = np.random.choice([0, 1], p=[p[session, t], 1 - p[session, t]])
 
             # Assign reward
-            r[session, t] = rewards[c[session, t], t]
+            r[session, t] = rewards[c[session, t], t] if static else rewards[session, c[session, t], t]
 
             # Update Q-values and choice traces
             if t < n_trials - 1:
@@ -441,21 +442,37 @@ def simulate_Qlearning_with_variable_params(
 
 
 
-def gen_reward_seq(seed=1979, T = 5000, pHigh = 0.8, pLow = 0.2, interval = 50):
+def gen_reward_seq(seed=1979, T = 5000, pHigh = 0.8, pLow = 0.2, interval = 50, N=None):
 
     np.random.seed(seed)
 
     # Create the rewards array
-    rewards = np.zeros((2, T))
-
     # Assign rewards to the array, flipping every 50 trials
-    for t in range(T):
-        if t % (interval * 2) < interval:
-            rewards[0, t] = np.random.choice([0, 1], p=[pHigh, pLow])
-            rewards[1, t] = np.random.choice([0, 1], p=[pLow, pHigh])
-        else:
-            rewards[0, t] = np.random.choice([0, 1], p=[pLow, pHigh])
-            rewards[1, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+    if N is not None:
+        rewards = np.zeros((N, 2, T))
+        for n in range(N):
+            pHigh = random.uniform(0.5, 1.0)
+            pLow = 1-pHigh
+            for t in range(T):
+                if t % (interval * 2) < interval:
+                    rewards[n,0, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+                    rewards[n,1, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                else:
+                    rewards[n,0, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                    rewards[n,1, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+        print("generating rewards for participants individually")
+    else:
+        rewards = np.zeros((2, T))
+        for t in range(T):
+            if t % (interval * 2) < interval:
+                rewards[0, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+                rewards[1, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+            else:
+                rewards[0, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                rewards[1, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+
+    
+    
 
     return rewards
 

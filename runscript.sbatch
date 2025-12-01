@@ -18,6 +18,6 @@
 #SBATCH --constraint=a100_80gb|h100_80gb
 #SBATCH --nice=10000
 
-
+cd /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty
  
 python run_Q_model.py

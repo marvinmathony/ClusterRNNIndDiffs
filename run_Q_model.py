@@ -26,10 +26,10 @@ tf.random.set_seed(seed_value)
 # Parameters and Variables
 sim_nametag = "Katahira_setup"
 latent_nametag = "latentmodel"
-latent = False
+latent = True
 palminteri = False
 sloutsky = False
-model_fitting = False
+model_fitting = True
 animation = False
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)
@@ -129,11 +129,11 @@ c_test = torch.from_numpy(c_test).float().to(device)
 
 B, T, in_dim = xin_train.shape
 B_test, T_test, in_dim_test = xin_test.shape
-z_dim = 6
+z_dim = 3
 A = 2
 
 # --- Train RNN ---
-hidden = 2
+hidden = 10
 epochs = 5000
 if latent:
     

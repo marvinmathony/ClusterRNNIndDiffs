@@ -11,14 +11,15 @@ from sklearn.metrics import r2_score
 from sklearn.model_selection import cross_val_score
 from sklearn.linear_model import LogisticRegression
 from sklearn.manifold import TSNE, MDS
+from scipy.stats import pearsonr
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #latent = True
 latent_nametag = "latentmodel" #loading
-model_fitting = False
+model_fitting = True
 vanilla_nametag = "vanilla"
-latent = False
+latent = True
 analyze_Q = False
 
 #### Load Data ####
@@ -26,6 +27,46 @@ analyze_Q = False
 df_train = pd.read_csv("data/df_train.csv")
 df_test = pd.read_csv("data/df_test.csv")
 parameter_df = pd.read_csv("data/true_parameter_values.csv")
+test_parameter_df = pd.read_csv("data/true_test_parameter_values.csv")
+fitted = np.load("data/params_dict.npz", allow_pickle=True)
+
+fitted_params_dict = {}
+
+for key in fitted.files:
+    arr = fitted[key]
+    
+    if arr.dtype == object and arr.size == 1:
+        # only unwrap if truly a scalar object
+        fitted_params_dict[key] = arr.item()
+    else:
+        # otherwise keep the array as-is
+        fitted_params_dict[key] = arr
+
+#for key, value in fitted_params_dict.items():
+#    print(f"key: {key}, value: {value}")
+fq_map = fitted_params_dict['FQ_MAP']
+
+fitted_FQ_params = [v[0] for k, v in fq_map.items()]
+alphaP = parameter_df["alphaP_list"].to_numpy()
+alphaP_test = test_parameter_df["alphaP_list"].to_numpy()
+r, p = pearsonr(fitted_FQ_params, alphaP)
+print("Correlation r =", r)
+print("p-value =", p)
+
+"""#look at only subset of participants
+lower_bound = 0.4
+upper_bound = 0.6
+mask = (alphaP >= lower_bound) & (alphaP <= upper_bound)
+alphaP_filtered = alphaP[mask]
+fitted_FQ_params = np.array(fitted_FQ_params)
+fitted_filtered = fitted_FQ_params[mask]
+r_filtered, p_filtered = pearsonr(fitted_filtered, alphaP_filtered)
+print(f"Correlation of subset between {lower_bound} and {upper_bound}: r =", r_filtered)
+print(f"how many parameters are within bounds: {fitted_filtered.size}")
+print("p-value of subset =", p_filtered)"""
+
+
+
 
 p1_common_dict = dict(np.load("data/p1_common_dict.npz", allow_pickle=True))
 rewardsTrain = np.load("data/rewards_train.npy")
@@ -106,8 +147,19 @@ if analyze_Q:
     print("plot saved under plots/dim_reduction_FQ_values.png")
 
 else:
-    params = parameter_df["alphaP_list"].values
-    plf.plot_latents(dim_reduction="mds", latent_tensor = latent_tensor, avg=True, n_components=2, name="simulation_vanilla_uniform", df=df_test, param_array = params)
+    params = test_parameter_df["alphaP_list"].values
+    #latent_tensor = latent_tensor
+    plf.plot_latents(dim_reduction="mds", latent_tensor = latent_tensor, avg=False, n_components=2, name="simulation_latent_uniform", df=df_test, param_array = params)
+    distance_matrix_latents = plf.rsa_latents(latents = latent_tensor, metric="cosine",title=latent_nametag, reduction="last", plot=True, original_data=False)
+    distance_matrix_params = plf.rsa_latents(latents = alphaP_test, metric="cosine",title="test_params", reduction="entire", plot=True, original_data=True)
+    #calculate correlation coefficient between actual alpha values and RSA
+    def vectorize_rsa(mat):
+    # Take only the upper triangle, excluding diagonal
+        return mat[np.triu_indices_from(mat, k=1)]
+    vec_params  = vectorize_rsa(distance_matrix_params)
+    vec_latents = vectorize_rsa(distance_matrix_latents)
+    corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
+    print(f"correlation between latent and actual parameters: {corr_matrix}")
 
 
     """participants = sorted(fq_common.keys()) 
