@@ -442,24 +442,41 @@ def simulate_Qlearning_with_variable_params(
 
 
 
-def gen_reward_seq(seed=1979, T = 5000, pHigh = 0.8, pLow = 0.2, interval = 50, N=None):
+def gen_reward_seq(seed=1979, T = 5000, interval = 50, N=None):
 
     np.random.seed(seed)
-
+    dummy_array = [1,1,1]
+    p_groups = np.random.dirichlet(dummy_array)
+    environments = ["low", "normal", "high"]
+    
     # Create the rewards array
     # Assign rewards to the array, flipping every 50 trials
     if N is not None:
         rewards = np.zeros((N, 2, T))
         for n in range(N):
-            pHigh = random.uniform(0.5, 1.0)
-            pLow = 1-pHigh
+            # assign group A, B and C here (one bad group, one normal group, one good group)
+            # randomly sampe interval between 20 to 100 per participant
+            selected_env = np.random.choice(environments)
+            print(f"selected environment: {selected_env}")
+            if selected_env == "low":
+                pHigh = random.uniform(0.1, 0.3)
+                gap_low   = random.uniform(0.05, 0.15)
+                pLow  = pHigh - gap_low
+            elif selected_env == "normal":
+                pHigh = 0.8
+                pLow = 0.2
+            else:
+                pHigh = random.uniform(0.7, 0.95)
+                gap_high   = random.uniform(0.2, 0.4)
+                pLow  = max(0.05, pHigh - gap_high)
+
             for t in range(T):
                 if t % (interval * 2) < interval:
-                    rewards[n,0, t] = np.random.choice([0, 1], p=[pHigh, pLow])
-                    rewards[n,1, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                    rewards[n, 0, t] = 1 if np.random.rand() < pHigh else 0
+                    rewards[n, 1, t] = 1 if np.random.rand() < pLow else 0
                 else:
-                    rewards[n,0, t] = np.random.choice([0, 1], p=[pLow, pHigh])
-                    rewards[n,1, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+                    rewards[n, 1, t] = 1 if np.random.rand() < pHigh else 0
+                    rewards[n, 0, t] = 1 if np.random.rand() < pLow else 0
         print("generating rewards for participants individually")
     else:
         rewards = np.zeros((2, T))
@@ -475,6 +492,65 @@ def gen_reward_seq(seed=1979, T = 5000, pHigh = 0.8, pLow = 0.2, interval = 50, 
     
 
     return rewards
+
+
+def generate_drifting_binary_bandit(
+        N_participants=200,
+        T=200,                  # trials per block
+        Bk=10,                  # blocks per participant
+        sigma_rw=0.10,          # volatility of reward drift
+        sigma_participant=0.05, # participant-specific variability in drift
+        init_mean=0.5,          # initial reward mean
+    ):
+    """
+    Generates a 2-armed drifting bandit environment with:
+        - binary rewards
+        - drifting reward probabilities
+        - per-participant volatility σ_rw
+    Output:
+        rewards: shape (N, Bk, T, 2)
+        params: dict with α, β, σ_rw per participant
+    """
+
+    rewards = np.zeros((N_participants, Bk, T, 2))
+
+    # --------------------------
+    # 1. Sample participant traits
+    # --------------------------
+    sigmas = np.abs(np.random.normal(sigma_rw, sigma_participant, N_participants))
+
+    # --------------------------
+    # 2. Loop participants
+    # --------------------------
+    for n in range(N_participants):
+        for b in range(Bk):
+
+            # drifting reward logits for both arms
+            mu = np.array([init_mean, 1-init_mean])  # starting means for 2 arms
+
+            for t in range(T):
+
+                # convert means to probabilities
+                p = np.clip(mu, 0.001, 0.999)
+
+                # sample rewards
+                r0 = np.random.rand() < p[0]
+                r1 = np.random.rand() < p[1]
+
+                rewards[n,b,t,0] = int(r0)
+                rewards[n,b,t,1] = int(r1)
+
+                # drift both means independently
+                mu += np.random.normal(0, sigmas[n], size=2)
+
+                # clamp to valid range
+                mu = np.clip(mu, 0.001, 0.999)
+
+    params = {
+        "sigma_rw": sigmas
+    }
+
+    return rewards, params
 
 def gen_data_AsymmetricQlearning_variable_alpha(rewards, seed=1979, n_trials=200, n_sessions=10, 
                                                 alphaP_list=None, alphaN_list=None, 

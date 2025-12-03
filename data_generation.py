@@ -11,14 +11,18 @@ nSession = 200
 
 
 # --- Data Generation ---
-rewardsTrain = sim.gen_reward_seq(seed=seed_base, T=nTrial, pHigh=0.7, pLow=0.3, interval=50, N = nSession)
-rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, pHigh=0.7, pLow=0.3, interval=50, N=nSession)
+rewardsTrain = sim.gen_reward_seq(seed=seed_base, T=nTrial, interval=50, N = nSession)
+rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, interval=50, N=nSession)
+
+#rewardsTrain = sim.generate_drifting_binary_bandit()
+#rewardsTest = sim.generate_drifting_binary_bandit()
+
 np.save("data/rewards_train.npy", rewardsTrain)
 
-true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type="discrete_alpha_only", #ind_diff_type='uniform', #ind_diff_type="discrete_alpha_only",
+true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='uniform', #ind_diff_type='uniform', #ind_diff_type="discrete_alpha_only",
                                           Delta_alpha=0.8, nSession=nSession)
 
-true_param_test = sim.generate_parameter_lists(true_model='FQ', ind_diff_type="discrete_alpha_only",#ind_diff_type='uniform', #ind_diff_type="discrete_alpha_only",
+true_param_test = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='uniform',#ind_diff_type='uniform', #ind_diff_type="discrete_alpha_only",
                                           Delta_alpha=0.8, nSession=nSession)
 
 true_param_df = pd.DataFrame(true_param)

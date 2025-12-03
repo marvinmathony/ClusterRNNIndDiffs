@@ -274,7 +274,7 @@ class AblatedDecoder(nn.Module):
     
 
 class AblatedRNN(nn.Module):
-    def __init__(self, in_dim=2, hid=hidden_dim, A=2, block_structure = True):
+    def __init__(self,hid, in_dim=2, A=2, block_structure = True):
         super().__init__()
         self.in_dim = in_dim
         self.dec = AblatedDecoder(in_dim,hid,A)
@@ -1831,82 +1831,7 @@ def test_latentrnn_secondstep_causal_2_vectorized(model, blocks, y, N=100, num_a
     return log_likelihoods_per_participant.mean().item(), log_likelihoods_per_participant
 
 
-# Causal Importance-Weighted Test Function (per-timestep z)
-@torch.no_grad()
-def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100, num_actions=2, first_n=None, id_case = True):
-    """
-    Args:
-        model: LatentRNN_secondstep instance with encoder + frozen decoder
-        blocks: (B, Bk, T, in_dim) input histories
-        y:      (B, Bk, T) action labels
-        N:      number of importance samples
-        num_actions: number of actions (e.g., 2)
-        first_n: if set, truncate to first_n time steps
-    Returns:
-        IWLL scalar (mean across participants), IWLL per participant (B,)
-    """
-    model.eval()
-    y = y.squeeze(-1)  # ensure shape (B, Bk, T)
 
-    if first_n is not None:
-        blocks = blocks[:, :, :first_n]
-        y = y[:, :, :first_n]
-
-    B, Bk, T, A = blocks.shape[0], blocks.shape[1], blocks.shape[2], num_actions
-    z_dim = model.encoder.mu_head.out_features
-    device = blocks.device
-
-    log_likelihoods_per_participant = torch.zeros(B, device=device)
-    #print(f"z_samples shape: {z_samples.shape}")
-    #print(f"z_samples: {z_samples}")
-    #z_samples = z_samples.unsqueeze(2).unsqueeze(3)  # (N, B, 1, 1, z_dim) for broadcasting
-    #print(f"z_samples expanded shape: {z_samples.shape}")
-    #print(f"z_samples after formatting: {z_samples}")
-    mu_tensor = torch.ones(B, T, z_dim)
-    
-    for participant_idx in range(B):
-        participant_log_likelihood = 0.0
-        
-        for block_idx in range(Bk):
-            block_data = blocks[participant_idx, block_idx]  # (T, in_dim)
-            block_actions = y[participant_idx, block_idx]  # (T,)
-            
-            block_log_likelihood = 0.0
-            for t in range(1, T + 1):
-                # Only use data up to time t (causality)
-                data_up_to_t = block_data[:t]  # (t, in_dim)
-                data_batched = data_up_to_t.unsqueeze(0).unsqueeze(0)  # (1, 1, t, in_dim)
-                
-                if id_case:
-                    # Get posterior parameters at time t
-                    mu_t, logvar_t = model.encoder(data_batched, return_per_timestep=True)
-                    mu_t = mu_t[0, 0, -1]  # (z_dim,)
-                    mu_tensor[participant_idx, t-1] = mu_t # append latents to tensor
-                    logvar_t = logvar_t[0, 0, -1]  # (z_dim,)
-                    
-                    # Sample z from the posterior q(z|x_{1:t})
-                    std_t = torch.exp(0.5 * logvar_t)
-                    z_samples = mu_t + std_t * torch.randn((N, z_dim), device=device)
-                else:
-                    z_samples = torch.zeros((N, z_dim), device=device) #torch.ones((N, z_dim), device=device) 
-                
-                # Vectorized decoder - only uses data up to t
-                data_batch = data_up_to_t.unsqueeze(0).expand(N, -1, -1)  # (N, t, in_dim)
-                logits,_ = model.decoder(data_batch, z_samples, ID_test=True)  # (N, t, A)
-                log_probs = F.log_softmax(logits[:, -1], dim=-1)  # (N, A)
-                
-                action_t = block_actions[t-1].long()
-                log_probs_t = log_probs[:, action_t]  # (N,)
-                
-                # Marginalize over z samples (Monte Carlo integration)
-                log_p_at = torch.logsumexp(log_probs_t, dim=0) - math.log(N)
-                block_log_likelihood += log_p_at.item()
-            
-            participant_log_likelihood += block_log_likelihood 
-        
-        log_likelihoods_per_participant[participant_idx] = participant_log_likelihood
-    
-    return log_likelihoods_per_participant.mean().item(), log_likelihoods_per_participant, mu_tensor
 
 @torch.no_grad()
 def test_latentrnnZones(model, z, blocks, y, N=100, first_n=None):
