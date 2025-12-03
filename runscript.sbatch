@@ -19,5 +19,8 @@
 #SBATCH --nice=10000
 
 cd /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty
+
+for lmbd in 0.1 0.2 0.3 0.4; do
+    python run_Q_model.py --lmbd $lmbd
+done
  
-python run_Q_model.py

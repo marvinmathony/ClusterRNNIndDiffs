@@ -1,11 +1,11 @@
 import sim_Q_data as sim
 import os
+import argparse
 import pandas as pd
 import RL_fittingfunctions2 as fit
 import plot_functions as plf
 import random
 import numpy as np
-import tensorflow as tf
 import torch
 #from compare_models import *
 import copy
@@ -15,7 +15,14 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from modelsandtraining import *
 import json
+import wandb
 
+parser = argparse.ArgumentParser(description="hello")
+parser.add_argument('--lmbd', type=float, help="how to weigh the two losses", default=1.)
+args = parser.parse_args()
+
+wandb_name = "RNNIndDiffs"
+wandb.init(project=wandb_name, config=args)
 
 os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("plots", exist_ok=True)
@@ -26,7 +33,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 seed_value = 42
 random.seed(seed_value)           
 np.random.seed(seed_value)        
-tf.random.set_seed(seed_value)    
 
 #### Parameters and Variables ####
 sim_nametag = "Katahira_setup"
@@ -181,8 +187,9 @@ if latent:
         #think about whether I want to implement test data here too
         xenc_test = xin_test.unsqueeze(1)
         y_test    = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
+        print(f"targets: {y_test}")
         model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN(model=latent_secondstep, xenc=xenc_train,
-        blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, device=device, epochs=epochs, patience=epochs, lr=1e-3)
+        blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, device=device, epochs=epochs, patience=epochs, lr=1e-3, lmbd = args.lmbd)
 
 else:
     vanilla_nametag = "vanilla"
@@ -366,6 +373,8 @@ else:
     torch.save(model.state_dict(), "checkpoints/ablated_rnn.pt")
     np.savez("data/pA_rnn_dict.npz", **pA_rnn_dict)
     np.save("data/training_dict.npy", training_dict)
+
+wandb.finish()
 
 
 print("✅ Training and fitting done. Results saved to data/ and checkpoints/")

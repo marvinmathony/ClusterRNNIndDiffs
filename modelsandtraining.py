@@ -2,6 +2,7 @@ import torch, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
 import pandas as pd
 import math
 import numpy as np
+import wandb
 
 class Decoder(nn.Module):
     def __init__(self, in_dim, z_dim, hid, A=2):
@@ -596,9 +597,11 @@ def elbo_lossZ(logits, targets):
     nll = F.cross_entropy(logits.reshape(-1,A), targets.long().reshape(-1), reduction='mean')
     return nll, nll.detach()
 
-def step_two_loss(lambda_post, lambda_pol, mu, logvar, z_T, L_pol):
-    loss = lambda_post * gaussian_nll_point(mu, logvar, z_T) + lambda_pol * L_pol
-    return loss 
+def step_two_loss(lmbd, mu, logvar, z_T, L_pol):
+    kl_loss = gaussian_nll_point(mu, logvar, z_T)
+    loss = lmbd * kl_loss + (1-lmbd) * L_pol
+    #print(f"kl loss: {kl_loss}, policy loss: {L_pol}")
+    return loss, kl_loss
 
 def compute_kl_divergence_bernoulli(p_true, p_pred):
     epsilon = 1e-10  # To avoid division by zero and log(0) issues
@@ -655,8 +658,8 @@ def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val,
         logits, mu, lv, z, h0_ = model(xenc_prefix, blocks_prefix, sample_z=False)
         policy_loss, nll = elbo_lossZ(logits, y_prefix)
 
-        lambda_post, lambda_pol = 1.0, 1.0 #try setting lambda pol to 0 in order to only weigh z in training
-        loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
+        lmbd = 0.5 #try setting lambda pol to 0 in order to only weigh z in training
+        loss, _ = step_two_loss(lmbd, mu, lv, lookup_z, policy_loss)
         loss.backward()
         opt.step()
         train_elbos.append(loss.item())
@@ -667,7 +670,7 @@ def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val,
         model.eval()
         val_logits, mu_val, lv_val, _, _ = model(xenc_val_prefix, xenc_val_prefix, sample_z=False)
         val_policy_loss, val_nll = elbo_lossZ(val_logits, yval_prefix)
-        val_loss = step_two_loss(lambda_post, lambda_pol, mu_val, lv_val, z_val_lookup, val_policy_loss)
+        val_loss, _ = step_two_loss(lmbd, mu_val, lv_val, z_val_lookup, val_policy_loss)
         val_elbos.append(val_loss.item())
             
         #accuracy tracking
@@ -739,7 +742,7 @@ def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val,
         #val_elbos.append(val_loss)
     return model, mu_best, lv_best, train_elbos, val_elbos, training_dict, pA_per_epoch
 
-def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, device, epochs=60, patience = 300, lr=1e-3, window_size=40):
+def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, device, epochs=60, patience = 300, lr=1e-3, window_size=40, lmbd = 0.5):
     #print(f"x_enc shape: {xenc.shape}, blocks shape: {blocks.shape}, y shape: {y.shape}")
     #xenc input must have shape (B, B_blk, T, in_dim)
     train_elbos = []
@@ -760,6 +763,8 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
     for p in model.decoder.parameters():
         assert not p.requires_grad, "Decoder parameters should be frozen before training"
 
+    kl_loss_list = []
+    CE_loss_list = []
     for ep in range(1,epochs+1):
         """model.train()
         logits, mu, lv, z, h0_ = model(xenc, blocks, sample_z=False) # two times x data for modularity 
@@ -791,8 +796,7 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         policy_loss, nll = elbo_lossZ(logits, y_prefix)
 
         #think about z and action loss and implementing it step wise
-        lambda_post, lambda_pol = 1.0, 1.0 #try setting lambda pol to 0 in order to only weigh z in training
-        loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, policy_loss)
+        loss, kl_loss_train = step_two_loss(lmbd, mu, lv, lookup_z, policy_loss)
         loss.backward()
         opt.step()
 
@@ -801,8 +805,11 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         model.eval()
         val_logits, _, _, _, _ = model(xenc_val_prefix, xenc_val_prefix, sample_z=False)
         val_policy_loss, val_nll = elbo_lossZ(val_logits, yval_prefix)
-        val_loss = step_two_loss(lambda_post, lambda_pol, mu, lv, lookup_z, val_policy_loss)
+        val_loss, kl_loss = step_two_loss(lmbd, mu, lv, lookup_z, val_policy_loss)
         val_elbos.append(val_loss.item())
+
+  
+
 
         #accuracy tracking
         #TRAINING
@@ -815,6 +822,9 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         acc = torch.sum(predictions_flat == y_flat)
         final_acc = (acc/total).item()
         accuracy_dict[ep] = final_acc
+
+        
+
 
         # KL monitoring (optional)
         if p_target is not None:
@@ -846,6 +856,8 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         val_accuracy_dict[ep] = final_val_acc
         val_acc_history.append(final_val_acc)
         model_state_dict[ep] = {k: v.detach().clone() for k, v in model.state_dict().items()}
+
+        wandb.log({"loss_test": val_policy_loss, "kl_loss": kl_loss, "accuracy_test": final_val_acc}, step=ep)
 
         if val_loss.item() < best_val_loss:
             best_val_loss = val_loss.item()
