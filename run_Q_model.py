@@ -37,7 +37,7 @@ np.random.seed(seed_value)
 #### Parameters and Variables ####
 sim_nametag = "Katahira_setup"
 latent_nametag = "latentmodel"
-latent = True
+latent = False
 palminteri = False
 sloutsky = False
 model_fitting = False
@@ -110,6 +110,7 @@ else:
     df_train = pd.read_csv("data/df_train.csv")
     df_test = pd.read_csv("data/df_test.csv")
     session_ll_df_test = pd.read_csv("data/session_ll_df_test.csv")
+    test_parameter_df = pd.read_csv("data/true_test_parameter_values.csv")
 
     # --- Load NumPy arrays ---
     xin_train = np.load("data/xin_train.npy")
@@ -121,6 +122,8 @@ else:
     pA_test = np.load("data/pA_test.npy")
     c_train = np.load("data/c_train.npy")
     c_train = torch.from_numpy(c_train).float().to(device)
+    alphaP_test = test_parameter_df["alphaP_list"].to_numpy()
+    params = test_parameter_df["alphaP_list"].values
 
 
 
@@ -139,7 +142,7 @@ B_test, T_test, in_dim_test = xin_test.shape
 z_dim = 3
 A = 2
 hidden = 10
-epochs = 5000
+epochs = 10000
 
 
 #### TRAINING #####
@@ -189,7 +192,7 @@ if latent:
         y_test    = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
         print(f"targets: {y_test}")
         model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN(model=latent_secondstep, xenc=xenc_train,
-        blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, device=device, epochs=epochs, patience=epochs, lr=1e-3, lmbd = args.lmbd)
+        blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, device=device,ctest=c_test, ctrain=c_train,alpha_values_test=params, epochs=epochs, patience=epochs, lr=1e-3, lmbd = args.lmbd)
 
 else:
     vanilla_nametag = "vanilla"
@@ -204,7 +207,7 @@ else:
         print(f"xin test shape: {xin_test.shape}")
         print(f"choice one hot test shape: {choice_one_hot_test.shape}")
         model, train_loss, val_loss, kl_loss, pA_rnn_dict, training_dict = train_ablated_noblocks(
-        model, xin_train, choice_one_hot_train, xin_test, choice_one_hot_test, device=device, p_target=pA, p_test=pA_test, epochs = epochs, lr = 1e-3
+        model, xin_train, choice_one_hot_train, xin_test, choice_one_hot_test, device=device, ctest=c_test, ctrain=c_train, alpha_values_test=params, p_target=pA, p_test=pA_test, epochs = epochs, lr = 1e-3
         )
 
 # Save model configuration for reloading

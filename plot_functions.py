@@ -1320,7 +1320,7 @@ def rsa_latents(latents, metric="cosine",title=None, reduction = "avg", plot=Tru
         plt.xlabel("Participants")
         plt.ylabel("Participants")
         plt.tight_layout()
-        plt.savefig(f"plots/RSA_{title}.png")
+        #plt.savefig(f"plots/RSA_{title}.png")
         plt.show()
 
     return dist_mat

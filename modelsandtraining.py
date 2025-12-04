@@ -3,6 +3,7 @@ import pandas as pd
 import math
 import numpy as np
 import wandb
+import plot_functions as plf
 
 class Decoder(nn.Module):
     def __init__(self, in_dim, z_dim, hid, A=2):
@@ -185,6 +186,11 @@ class AblatedRNN(nn.Module):
         else:
             logits, final_hid, hidden_tr = self.dec(blocks, h0=h0)
             return logits, final_hid, hidden_tr
+        
+# small helper
+def vectorize_rsa(mat):
+    # Take only the upper triangle, excluding diagonal
+        return mat[np.triu_indices_from(mat, k=1)]
     
 ### TRAINING SCRIPTS ###
 def train_latentrnn_noblocks_palminteri(
@@ -340,6 +346,7 @@ def train_latentrnn_noblocks(
     kl_test_vals = []
     accuracy = []
     test_accuracy = []
+    best_acc = 0
     best_kl = float('inf')
     best_test_kl = float('inf')
     best_epoch = None
@@ -407,6 +414,12 @@ def train_latentrnn_noblocks(
                     best_test_kl = kl_test
                     best_test_epoch_kl = ep
                     best_test_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        
+        #best state computed based on test accuracy
+        if acc_test > best_acc:
+            best_acc = acc_test
+            best_acc_test_epoch = ep
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
         if ep % 100 == 0:
             if p_target is not None:
@@ -742,7 +755,7 @@ def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val,
         #val_elbos.append(val_loss)
     return model, mu_best, lv_best, train_elbos, val_elbos, training_dict, pA_per_epoch
 
-def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, device, epochs=60, patience = 300, lr=1e-3, window_size=40, lmbd = 0.5):
+def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, device, ctest, ctrain,alpha_values_test, epochs=60, patience = 300, lr=1e-3, window_size=40, lmbd = 0.5):
     #print(f"x_enc shape: {xenc.shape}, blocks shape: {blocks.shape}, y shape: {y.shape}")
     #xenc input must have shape (B, B_blk, T, in_dim)
     train_elbos = []
@@ -754,11 +767,13 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
     best_kl = float('inf')
     best_epoch = None
     best_state = None
+    best_val_acc = 0
     pA_per_epoch = {}
     accuracy_dict = {}
     val_accuracy_dict = {}
     val_acc_history = []
     model_state_dict = {}
+    
     # freeze decoder
     for p in model.decoder.parameters():
         assert not p.requires_grad, "Decoder parameters should be frozen before training"
@@ -838,7 +853,7 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
 
                 if kl < best_kl:
                     best_kl = kl
-                    best_epoch = ep
+                    #best_epoch = ep
                     #best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
                     best_mu = mu
                     best_lv = lv
@@ -855,22 +870,40 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         final_val_acc = (val_acc/total_val).item()
         val_accuracy_dict[ep] = final_val_acc
         val_acc_history.append(final_val_acc)
-        model_state_dict[ep] = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        #model_state_dict[ep] = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
-        wandb.log({"loss_test": val_policy_loss, "kl_loss": kl_loss, "accuracy_test": final_val_acc}, step=ep)
+        if ep % 100 == 0 or ep == 1:
+            ckpt_path = f"checkpoints/IDRNN_epoch_{ep:04d}.pt"
+            torch.save(model.state_dict(), ckpt_path)
+            print(f"[{model.name}], epoch {ep:3d},  train loss {loss.item():.3f},  val loss {val_loss.item():.3f},  train_acciracy: {final_acc},  val_accuracy: {final_val_acc}")
+            # roll out the model for testing here (just use current model state and call the posterior sampling function)
+            # collect latents (from the model and also the original parameters - the latter will have to be passed to the training function as an argument)
+            # run RSA on both and compute correlation. Log the correlation 
+            _, latent_tensor, _, _ = compute_rnn_likelihoods_torch(test_latentrnn_secondstep_causal_posterior_weighting, model, xenc_val.squeeze(1), ctest, xenc.squeeze(1), latent=True, choice_train=None, id=True)
+            distance_matrix_latents = plf.rsa_latents(latents = latent_tensor, metric="euclidean",title="training_run_latentmodel", reduction="last", plot=False, original_data=False)
+            distance_matrix_params = plf.rsa_latents(latents = alpha_values_test, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True)
+            vec_params  = vectorize_rsa(distance_matrix_params)
+            vec_latents = vectorize_rsa(distance_matrix_latents)
+            corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
+            
 
-        if val_loss.item() < best_val_loss:
+        if final_val_acc > best_val_acc:
+            best_val_acc = final_val_acc
+            best_val_acc_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            best_epoch = ep
+
+        
+        wandb.log({"Cross Entropy Loss": val_policy_loss, "kl_loss": kl_loss, "accuracy_test": final_val_acc, "Correlation original params & latents": corr_matrix}, step=ep)
+
+        """if val_loss.item() < best_val_loss:
             best_val_loss = val_loss.item()
             best_val_loss_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             epochs_no_improve = 0
             
         else:
-            epochs_no_improve += 1
+            epochs_no_improve += 1"""
 
-        if ep % 100 == 0:
-            ckpt_path = f"checkpoints/IDRNN_epoch_{ep:04d}.pt"
-            torch.save(model.state_dict(), ckpt_path)
-            print(f"[{model.name}], epoch {ep:3d},  train loss {loss.item():.3f},  val loss {val_loss.item():.3f},  train_acciracy: {final_acc},  val_accuracy: {final_val_acc}")
+        
             
 
         #if epochs_no_improve >= patience:
@@ -878,14 +911,14 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
             #break
 
     #best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
-    window = window_size
+    """window = window_size
     smoothed_val_acc = np.convolve(val_acc_history, np.ones(window)/window, mode='valid')
     best_epoch = np.argmax(smoothed_val_acc) + window // 2
-    best_model_state = model_state_dict[best_epoch]
-    model.load_state_dict(best_model_state)
+    best_model_state = model_state_dict[best_epoch]"""
+    model.load_state_dict(best_val_acc_state)
 
 
-    print(f"best model state at epoch {best_epoch} with acc: {val_accuracy_dict[best_epoch]}")
+    print(f"best model state at epoch {best_epoch} with acc: {best_val_acc}")
     #model.load_state_dict(best_state)
     model.eval()
     with torch.no_grad():
@@ -993,7 +1026,7 @@ def train_ablated_noblocks_palminteri(model, X_train, y_train, X_val, y_val, epo
             "best_val_acc": best_val_acc}
     return model, train_elbos, val_elbos, kl_vals, pA_per_epoch, training_dict
 
-def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, p_target=None, p_test = None, epochs=5000, lr=0.001):
+def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctest, ctrain, alpha_values_test, p_target=None, p_test = None, epochs=5000, lr=0.001):
     train_elbos = []
     val_elbos = []
     kl_vals = []
@@ -1003,6 +1036,7 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, p_ta
     test_loss = []
     best_kl = float('inf')
     best_test_kl = float('inf')
+    best_acc = 0
     y_train = torch.argmax(y_train, dim=-1)
     y_test = torch.argmax(y_test, dim=-1)
     pA_per_epoch = {} # dictionary to store pA predictions for later comparison
@@ -1040,50 +1074,68 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, p_ta
             print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}")"""
 
         # === KL Divergence Monitoring ===
-        if p_target is not None:
-            model.eval()
-            with torch.no_grad():
-                p_target = p_target.to(device)
-                p_model = F.softmax(logits, dim=-1)  # (B, T, A)
-                p_model = p_model[:,:,0]
-                #print("p_target shape:", p_target.shape)
-                #print("p_model  shape:", p_model.shape)
-                kl = compute_kl_divergence_bernoulli(p_target, p_model)
-                kl_vals.append(kl)
+        model.eval()
+        with torch.no_grad():
+            if p_target is not None:
+                
+                
+                    p_target = p_target.to(device)
+                    p_model = F.softmax(logits, dim=-1)  # (B, T, A)
+                    p_model = p_model[:,:,0]
+                    #print("p_target shape:", p_target.shape)
+                    #print("p_model  shape:", p_model.shape)
+                    kl = compute_kl_divergence_bernoulli(p_target, p_model)
+                    kl_vals.append(kl)
 
-                logits_test, _, _ = model(X_test)  # (B, T, A)
+            logits_test, _, _ = model(X_test)  # (B, T, A)
+
+            nll_test = F.cross_entropy(logits_test.view(-1, logits_test.size(-1)), y_test.view(-1).long())
+            preds_test = logits_test.view(-1, logits_test.size(-1)).argmax(dim=-1)
+
+            # Ground truth labels
+            targets_test = y_test.view(-1).long()
+
+            # Accuracy: compare and compute mean
+            acc_test = (preds_test == targets_test).float().mean().item()
+            test_accuracy.append(acc_test)
+            test_loss.append(nll_test)
+
+            #test kl divergence
+            p_test = p_test.to(device)
+            p_model_test = F.softmax(logits_test, dim=-1)  # (B, T, A)
+            p_model_test = p_model_test[:,:,0]
+            #print("p_target shape:", p_target.shape)
+            #print("p_model  shape:", p_model.shape)
+            kl_test = compute_kl_divergence_bernoulli(p_test, p_model_test)
+            kl_test_vals.append(kl_test)
+
+            if acc_test > best_acc:
+                best_acc = acc_test
+                best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+                best_epoch = ep
+
+            """if kl < best_kl:
+                best_kl = kl
+                best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
+                best_epoch = ep
+            if kl_test < best_test_kl:
+                best_test_kl = kl_test
+                best_model_state_test = {k: v.clone() for k, v in model.state_dict().items()}
+                best_test_epoch_kl = ep"""
+
+            if ep % 100 == 0 or ep == 1:
+                print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}  KL {kl:.3f}  accuracy {acc}  test loss {nll_test}  test accuracy {acc_test}  test kl {kl_test}")
+                # roll out the model for testing here (just use current model state and call the posterior sampling function)
+                # collect latents (from the model and also the original parameters - the latter will have to be passed to the training function as an argument)
+                # run RSA on both and compute correlation. Log the correlation 
+                _, latent_tensor, _, _ = compute_rnn_likelihoods_torch(test_latentrnn_secondstep_causal_posterior_weighting, model, X_test, ctest, X_train, latent=False, choice_train=ctrain, id=False)
+                distance_matrix_latents = plf.rsa_latents(latents = latent_tensor, metric="euclidean",title="training_run_vanilla", reduction="avg", plot=False, original_data=False)
+                distance_matrix_params = plf.rsa_latents(latents = alpha_values_test, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True)
+                vec_params  = vectorize_rsa(distance_matrix_params)
+                vec_latents = vectorize_rsa(distance_matrix_latents)
+                corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
         
-                nll_test = F.cross_entropy(logits_test.view(-1, logits_test.size(-1)), y_test.view(-1).long())
-                preds_test = logits_test.view(-1, logits_test.size(-1)).argmax(dim=-1)
-
-                # Ground truth labels
-                targets_test = y_test.view(-1).long()
-
-                # Accuracy: compare and compute mean
-                acc_test = (preds_test == targets_test).float().mean().item()
-                test_accuracy.append(acc_test)
-                test_loss.append(nll_test)
-
-                #test kl divergence
-                p_test = p_test.to(device)
-                p_model_test = F.softmax(logits_test, dim=-1)  # (B, T, A)
-                p_model_test = p_model_test[:,:,0]
-                #print("p_target shape:", p_target.shape)
-                #print("p_model  shape:", p_model.shape)
-                kl_test = compute_kl_divergence_bernoulli(p_test, p_model_test)
-                kl_test_vals.append(kl_test)
-
-                if kl < best_kl:
-                    best_kl = kl
-                    best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
-                    best_epoch = ep
-                if kl_test < best_test_kl:
-                    best_test_kl = kl_test
-                    best_model_state_test = {k: v.clone() for k, v in model.state_dict().items()}
-                    best_test_epoch_kl = ep
-
-                if ep % 100 == 0:
-                    print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}  KL {kl:.3f}  accuracy {acc}  test loss {nll_test}  test accuracy {acc_test}  test kl {kl_test}")
+            wandb.log({"Cross Entropy Loss": nll, "Cross Entropy Test Loss": nll_test, "accuracy_test": acc_test, "Correlation original params & latents": corr_matrix}, step=ep)       
 
     
     best_epoch_test_acc = test_accuracy.index(max(test_accuracy))+1
@@ -1092,12 +1144,13 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, p_ta
     best_epoch_acc = accuracy.index(max(accuracy))+1
     #normalized_ll = torch.exp(nll_test / targets_test.numel()).cpu().item()
 
-    print(f"Best epoch kl: {best_epoch}")
-    print(f"Best test kl epoch: {best_test_epoch_kl}")
-    print(f"Best loss epoch: {best_epoch_train_loss}")
-    print(f"Best test loss epoch: {best_epoch_test_loss}")
-    print(f"Best accuracy loss epoch: {best_epoch_acc}")
-    print(f"Best test accuracy loss epoch: {best_epoch_test_acc}")
+    print(f"Best epoch test accuracy: {best_epoch}")
+    print(f"Best test accuracy: {best_acc}")
+    #print(f"Best test kl epoch: {best_test_epoch_kl}")
+    #print(f"Best loss epoch: {best_epoch_train_loss}")
+    #print(f"Best test loss epoch: {best_epoch_test_loss}")
+    #print(f"Best accuracy loss epoch: {best_epoch_acc}")
+    #print(f"Best test accuracy loss epoch: {best_epoch_test_acc}")
     #print(f"normalzed_ll: {normalized_ll}")
 
     model.load_state_dict(best_model_state)
@@ -1111,3 +1164,4 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, p_ta
             "best_kl": best_kl}
             #"normalized_ll": normalized_ll}
     return model, train_elbos, val_elbos, kl_vals, pA_per_epoch, training_dict
+
