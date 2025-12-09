@@ -24,5 +24,5 @@ cd /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty
 #    python run_Q_model.py --lmbd $lmbd
 #done
 
-python run_Q_model.py --lmbd 0
+python run_Q_model.py --lmbd 1
  

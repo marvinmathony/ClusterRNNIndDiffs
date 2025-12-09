@@ -37,10 +37,10 @@ np.random.seed(seed_value)
 #### Parameters and Variables ####
 sim_nametag = "Katahira_setup"
 latent_nametag = "latentmodel"
-latent = False
+latent = True
 palminteri = False
 sloutsky = False
-model_fitting = False
+model_fitting = True
 animation = False
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)
