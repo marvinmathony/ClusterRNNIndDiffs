@@ -323,6 +323,8 @@ def train_latentrnn_noblocks(
     y_onehot: torch.Tensor,            # (B, T, A) one-hot
     X_test: torch.Tensor,
     y_test_onehot: torch.Tensor,
+    ctrain: torch.Tensor,
+    train_alpha_values,
     p_target: torch.Tensor = None,     # (B, T) prob(arm0), optional
     p_test_target: torch.Tensor = None,
     epochs: int = 5000,
@@ -351,7 +353,10 @@ def train_latentrnn_noblocks(
     best_test_kl = float('inf')
     best_epoch = None
     best_state = None
+    best_state_acc = None
     pA_per_epoch = {}
+    corr_matrix = 0
+    best_corr = 0
 
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -377,6 +382,11 @@ def train_latentrnn_noblocks(
         acc = (preds == targets).float().mean().item()
         accuracy.append(acc)
 
+        model.eval()
+        # compute RSA correlation
+        # run RSA on both and compute correlation. Log the correlation    
+
+
         # KL monitoring (optional)
         if p_target is not None:
             model.eval()
@@ -388,7 +398,7 @@ def train_latentrnn_noblocks(
                 if kl < best_kl:
                     best_kl = kl
                     best_epoch = ep
-                    best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                    #best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         
         # test 
         if p_test_target is not None:
@@ -414,18 +424,31 @@ def train_latentrnn_noblocks(
                     best_test_kl = kl_test
                     best_test_epoch_kl = ep
                     best_test_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        with torch.no_grad():
+            #best state computed based on train accuracy
+            if acc_test > best_acc:
+                best_acc = acc_test
+                best_acc_epoch = ep
+                #best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            z_expanded = z.unsqueeze(1).expand(-1, X_train.size(1), -1)
+            distance_matrix_latents = plf.rsa_latents(latents = z_expanded, metric="euclidean",title="training_run_latentmodel", reduction="last", plot=False, original_data=False)
+            distance_matrix_params = plf.rsa_latents(latents = train_alpha_values, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True)
+            vec_params  = vectorize_rsa(distance_matrix_params)
+            vec_latents = vectorize_rsa(distance_matrix_latents)
+            corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
+            if corr_matrix > best_corr:
+                best_corr = corr_matrix
+                best_corr_ep = ep
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         
-        #best state computed based on train accuracy
-        if acc > best_acc:
-            best_acc = acc
-            best_acc_epoch = ep
-            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            if ep % 100 == 0:
+                if p_target is not None:
+                    print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}  KL {kl:.4f}  accuracy {acc}  test loss {nll_test}  test KL {kl_test}  test accuracy {acc_test}  corr latents and params: {corr_matrix}")
+                else:
+                    print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}")
 
-        if ep % 100 == 0:
-            if p_target is not None:
-                print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}  KL {kl:.4f}  accuracy {acc}  test loss {nll_test}  test KL {kl_test}  test accuracy {acc_test}")
-            else:
-                print(f"[LatentRNNz] epoch {ep:4d}  loss {nll.item():.4f}")
+        wandb.log({"training accuracy": acc, "common process kl loss test": kl_test, "common process accuracy test": acc_test, "Correlation original params & latents CP": corr_matrix}, step=ep)
+
 
     best_epoch_test_acc = test_accuracy.index(max(test_accuracy))+1
     best_epoch_test_loss = test_losses.index(min(test_losses))+1
@@ -443,6 +466,7 @@ def train_latentrnn_noblocks(
         best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         best_epoch = epochs
         best_kl = float('nan')
+        print("best state is last state")
 
     model.load_state_dict(best_state)
     model.eval()
@@ -453,7 +477,7 @@ def train_latentrnn_noblocks(
 
     training_dict = {
         "predictions": pA_best,
-        "weights": best_state,
+        "weights": best_state_acc,
         "best_model": model,
         "best_epoch": best_epoch,
         "best_kl": best_kl,
@@ -773,6 +797,7 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
     val_accuracy_dict = {}
     val_acc_history = []
     model_state_dict = {}
+    corr_matrix = 0
     
     # freeze decoder
     for p in model.decoder.parameters():
@@ -893,7 +918,7 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
             best_epoch = ep
 
         
-        wandb.log({"Cross Entropy Loss": val_policy_loss, "kl_loss": kl_loss, "accuracy_test": final_val_acc, "training accuracy": final_acc, "Correlation original params & latents": corr_matrix}, step=ep)
+        wandb.log({"Cross Entropy Loss step 2": val_policy_loss, "kl_loss step2": kl_loss, "accuracy_test step2": final_val_acc, "training accuracy step2": final_acc, "Correlation original params & latents step2": corr_matrix}, step=ep)
 
         """if val_loss.item() < best_val_loss:
             best_val_loss = val_loss.item()
@@ -1136,7 +1161,7 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctes
                 vec_latents = vectorize_rsa(distance_matrix_latents)
                 corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
         
-            wandb.log({"Cross Entropy Loss": nll, "Cross Entropy Test Loss": nll_test, "accuracy_test": acc_test, "acc train": acc, "Correlation original params & latents": corr_matrix}, step=ep)       
+            run1 = wandb.log({"Cross Entropy Loss": nll, "Cross Entropy Test Loss": nll_test, "accuracy_test": acc_test, "acc train": acc, "Correlation original params & latents": corr_matrix}, step=ep)       
 
     
     best_epoch_test_acc = test_accuracy.index(max(test_accuracy))+1
@@ -1153,7 +1178,7 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctes
     #print(f"Best accuracy loss epoch: {best_epoch_acc}")
     #print(f"Best test accuracy loss epoch: {best_epoch_test_acc}")
     #print(f"normalzed_ll: {normalized_ll}")
-
+    run1.finish()
     model.load_state_dict(best_model_state)
     logits_best_model, _, _ = model(X_train)
     pA_best_model = F.softmax(logits_best_model, dim=-1)

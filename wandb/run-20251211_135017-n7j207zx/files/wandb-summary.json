@@ -1,0 +1,1 @@
+{"_runtime":612.689347555,"_step":10000,"training accuracy":0.7514249682426453,"common process kl loss test":0.09110084921121597,"common process accuracy test":0.701824963092804,"Correlation original params & latents CP":0.30661157099257613,"_timestamp":1.7654574930262392e+09,"_wandb":{"runtime":612}}

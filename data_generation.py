@@ -6,12 +6,12 @@ import matplotlib.pyplot as plt
 
 # parameters and variables
 seed_base = 1
-nTrial = 200
-nSession = 200
+nTrial = 500
+nSession = 500
 
 
 # --- Data Generation ---
-rewardsTrain = sim.gen_reward_seq(seed=seed_base, T=nTrial, interval=50, N = nSession)
+rewardsTrain = sim.gen_reward_seq(seed=seed_base, T=nTrial, interval=50, N=nSession)
 rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, interval=50, N=nSession)
 
 #rewardsTrain = sim.generate_drifting_binary_bandit()

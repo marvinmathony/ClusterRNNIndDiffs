@@ -1,0 +1,97 @@
+{
+  "os":  "Linux-5.14.0-570.25.1.el9_6.x86_64-x86_64-with-glibc2.34",
+  "python":  "CPython 3.9.19",
+  "startedAt":  "2025-12-10T11:46:55.612770Z",
+  "args":  [
+    "--lmbd",
+    "0.1"
+  ],
+  "program":  "/ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty/run_Q_model.py",
+  "codePath":  "run_Q_model.py",
+  "codePathLocal":  "run_Q_model.py",
+  "git":  {
+    "remote":  "https://marvinmathony:@github.com/marvinmathony/ClusterRNNIndDiffs.git",
+    "commit":  "7634e33f4e00f767cc5448283c16a356eaef4be5"
+  },
+  "email":  "marvin.mathony@gmail.com",
+  "root":  "/ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty",
+  "host":  "gpusrv62.scidom.de",
+  "executable":  "/ictstr01/home/hcai/marvin.mathony/tools/apps/mamba/envs/RNNproject/bin/python",
+  "cpu_count":  64,
+  "cpu_count_logical":  128,
+  "gpu":  "NVIDIA A100 80GB PCIe",
+  "gpu_count":  1,
+  "disk":  {
+    "/":  {
+      "total":  "107307073536",
+      "used":  "64289304576"
+    }
+  },
+  "memory":  {
+    "total":  "810780372992"
+  },
+  "gpu_nvidia":  [
+    {
+      "name":  "NVIDIA A100 80GB PCIe",
+      "memoryTotal":  "85899345920",
+      "cudaCores":  6912,
+      "architecture":  "Ampere",
+      "uuid":  "GPU-24758699-1c3a-c1b0-3dfb-a9c71d06d5db"
+    }
+  ],
+  "cudaVersion":  "12.9",
+  "slurm":  {
+    "cluster_name":  "algoritam",
+    "conf":  "/etc/slurm/slurm.conf",
+    "cpus_on_node":  "20",
+    "cpus_per_task":  "20",
+    "gpus_on_node":  "1",
+    "gtids":  "0",
+    "job_account":  "aih",
+    "job_cpus_per_node":  "20",
+    "job_end_time":  "1765424493",
+    "job_gid":  "20309",
+    "job_gpus":  "1",
+    "job_id":  "32869701",
+    "job_name":  "GRU4",
+    "job_nodelist":  "gpusrv62",
+    "job_num_nodes":  "1",
+    "job_partition":  "gpu_p",
+    "job_qos":  "gpu_normal",
+    "job_start_time":  "1765366893",
+    "job_uid":  "1000263",
+    "job_user":  "marvin.mathony",
+    "jobid":  "32869701",
+    "launch_node_ipaddr":  "10.233.0.251",
+    "localid":  "0",
+    "mem_per_node":  "32768",
+    "mpi_type":  "none",
+    "nnodes":  "1",
+    "nodeid":  "0",
+    "nodelist":  "gpusrv62",
+    "oom_kill_step":  "0",
+    "open_mode":  "a",
+    "prio_process":  "0",
+    "procid":  "0",
+    "pty_port":  "61145",
+    "pty_win_col":  "219",
+    "pty_win_row":  "15",
+    "srun_comm_host":  "10.233.0.251",
+    "srun_comm_port":  "60396",
+    "step_id":  "4294967290",
+    "step_launcher_port":  "60396",
+    "step_nodelist":  "supergpu03",
+    "step_num_nodes":  "1",
+    "step_num_tasks":  "1",
+    "step_tasks_per_node":  "1",
+    "stepid":  "4294967290",
+    "submit_dir":  "/ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty",
+    "submit_host":  "supergpu03.scidom.de",
+    "task_pid":  "3077110",
+    "tasks_per_node":  "1",
+    "topology_addr":  "gpusrv62",
+    "topology_addr_pattern":  "node",
+    "tres_per_task":  "cpu=20"
+  },
+  "writerId":  "rsiltg7icwp1fhfqzwvq2jahjl1i51ok"
+}

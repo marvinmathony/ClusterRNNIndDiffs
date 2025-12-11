@@ -1,0 +1,116 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            q7ucmmipp3gtpux2x93eb3oboy7853qf:
+                args:
+                    - --lmbd
+                    - "0.3"
+                codePath: run_Q_model.py
+                codePathLocal: run_Q_model.py
+                cpu_count: 112
+                cpu_count_logical: 224
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "321965260800"
+                        used: "44235137024"
+                email: marvin.mathony@gmail.com
+                executable: /ictstr01/home/hcai/marvin.mathony/tools/apps/mamba/envs/RNNproject/bin/python
+                git:
+                    commit: 7634e33f4e00f767cc5448283c16a356eaef4be5
+                    remote: https://marvinmathony:@github.com/marvinmathony/ClusterRNNIndDiffs.git
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-5ab92ca6-9797-f743-ec92-1d8d50c84cae
+                host: supergpu32.scidom.de
+                memory:
+                    total: "2163578134528"
+                os: Linux-5.14.0-570.25.1.el9_6.x86_64-x86_64-with-glibc2.34
+                program: /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty/run_Q_model.py
+                python: CPython 3.9.19
+                root: /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty
+                slurm:
+                    cluster_name: algoritam
+                    conf: /etc/slurm/slurm.conf
+                    cpus_on_node: "20"
+                    cpus_per_task: "20"
+                    gpus_on_node: "1"
+                    gtids: "0"
+                    job_account: aih
+                    job_cpus_per_node: "20"
+                    job_end_time: "1765442403"
+                    job_gid: "20309"
+                    job_gpus: "7"
+                    job_id: "32878563"
+                    job_name: GRU4
+                    job_nodelist: supergpu32
+                    job_num_nodes: "1"
+                    job_partition: gpu_p
+                    job_qos: gpu_normal
+                    job_start_time: "1765384803"
+                    job_uid: "1000263"
+                    job_user: marvin.mathony
+                    jobid: "32878563"
+                    launch_node_ipaddr: 10.233.0.251
+                    localid: "0"
+                    mem_per_node: "32768"
+                    mpi_type: none
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: supergpu32
+                    oom_kill_step: "0"
+                    open_mode: a
+                    prio_process: "0"
+                    procid: "0"
+                    pty_port: "61145"
+                    pty_win_col: "219"
+                    pty_win_row: "15"
+                    srun_comm_host: 10.233.0.251
+                    srun_comm_port: "60396"
+                    step_id: "4294967290"
+                    step_launcher_port: "60396"
+                    step_nodelist: supergpu03
+                    step_num_nodes: "1"
+                    step_num_tasks: "1"
+                    step_tasks_per_node: "1"
+                    stepid: "4294967290"
+                    submit_dir: /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty
+                    submit_host: supergpu03.scidom.de
+                    task_pid: "2362179"
+                    tasks_per_node: "1"
+                    topology_addr: supergpu32
+                    topology_addr_pattern: node
+                    tres_per_task: cpu=20
+                startedAt: "2025-12-10T16:47:02.516043Z"
+                writerId: q7ucmmipp3gtpux2x93eb3oboy7853qf
+        m: []
+        python_version: 3.9.19
+        t:
+            "1":
+                - 1
+                - 2
+                - 3
+                - 5
+                - 53
+            "2":
+                - 1
+                - 2
+                - 3
+                - 5
+                - 53
+            "3":
+                - 2
+                - 16
+                - 61
+            "4": 3.9.19
+            "5": 0.23.1
+            "12": 0.23.1
+            "13": linux-x86_64
+lmbd:
+    value: 0.3

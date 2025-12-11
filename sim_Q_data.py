@@ -453,9 +453,11 @@ def gen_reward_seq(seed=1979, T = 5000, interval = 50, N=None):
     # Assign rewards to the array, flipping every 50 trials
     if N is not None:
         rewards = np.zeros((N, 2, T))
+        
         for n in range(N):
             # assign group A, B and C here (one bad group, one normal group, one good group)
             # randomly sampe interval between 20 to 100 per participant
+            #interval = random.randrange(1, 80)
             selected_env = np.random.choice(environments)
             print(f"selected environment: {selected_env}")
             if selected_env == "low":
@@ -493,6 +495,39 @@ def gen_reward_seq(seed=1979, T = 5000, interval = 50, N=None):
 
     return rewards
 
+def gen_reward_seq_og(seed=1979, T = 5000, pHigh = 0.8, pLow = 0.2, interval = 50, N=None):
+
+    np.random.seed(seed)
+
+    # Create the rewards array
+    # Assign rewards to the array, flipping every 50 trials
+    if N is not None:
+        rewards = np.zeros((N, 2, T))
+        for n in range(N):
+            pHigh = random.uniform(0.5, 1.0)
+            pLow = 1-pHigh
+            for t in range(T):
+                if t % (interval * 2) < interval:
+                    rewards[n,0, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+                    rewards[n,1, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                else:
+                    rewards[n,0, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                    rewards[n,1, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+        print("generating rewards for participants individually")
+    else:
+        rewards = np.zeros((2, T))
+        for t in range(T):
+            if t % (interval * 2) < interval:
+                rewards[0, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+                rewards[1, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+            else:
+                rewards[0, t] = np.random.choice([0, 1], p=[pLow, pHigh])
+                rewards[1, t] = np.random.choice([0, 1], p=[pHigh, pLow])
+
+    
+    
+
+    return rewards
 
 def generate_drifting_binary_bandit(
         N_participants=200,

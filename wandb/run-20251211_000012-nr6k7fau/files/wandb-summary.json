@@ -1,0 +1,1 @@
+{"_wandb":{"runtime":44},"acc train":0.7312749624252319,"_runtime":44.562528831,"Correlation original params & latents":0.5332067035068473,"_timestamp":1.7654076577545445e+09,"_step":10000,"Cross Entropy Loss":0.502604603767395,"Cross Entropy Test Loss":0.502629816532135,"accuracy_test":0.7292999625205994}

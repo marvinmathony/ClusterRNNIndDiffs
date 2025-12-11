@@ -1,0 +1,1 @@
+{"training accuracy":0.7256630063056946,"Cross Entropy Loss":0.5177640914916992,"kl_loss":-5.698248863220215,"accuracy_test":0.7199723720550537,"_wandb":{"runtime":3361},"_timestamp":1.7654454301414645e+09,"_step":10000,"Correlation original params & latents":0.07272699674499565,"_runtime":3361.984425404}

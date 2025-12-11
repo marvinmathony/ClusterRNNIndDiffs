@@ -40,7 +40,7 @@ latent_nametag = "latentmodel"
 latent = True
 palminteri = False
 sloutsky = False
-model_fitting = True
+model_fitting = False
 animation = False
 
 n_fit_iter = 5 # iteration for RL fitting (from random initialization)
@@ -111,6 +111,7 @@ else:
     df_test = pd.read_csv("data/df_test.csv")
     session_ll_df_test = pd.read_csv("data/session_ll_df_test.csv")
     test_parameter_df = pd.read_csv("data/true_test_parameter_values.csv")
+    train_param_df = pd.read_csv("data/true_parameter_values.csv")
 
     # --- Load NumPy arrays ---
     xin_train = np.load("data/xin_train.npy")
@@ -124,6 +125,7 @@ else:
     c_train = torch.from_numpy(c_train).float().to(device)
     alphaP_test = test_parameter_df["alphaP_list"].to_numpy()
     params = test_parameter_df["alphaP_list"].values
+    train_params = train_param_df["alphaP_list"].values
 
 
 
@@ -139,7 +141,7 @@ B, T, in_dim = xin_train.shape
 B_test, T_test, in_dim_test = xin_test.shape
 
 # HYPERPARAMS
-z_dim = 3
+z_dim = 6
 A = 2
 hidden = 10
 epochs = 10000
@@ -161,9 +163,11 @@ if latent:
         y_onehot=c_train, ids_val=val_ids, X_val=xin_val, y_val_onehot=c_val, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
     else:
         model, train_loss, kl_vals, pA_dict, training_dict = train_latentrnn_noblocks(model=model, ids_train=ids, ids_test=idstest, X_train=xin_train,
-        y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test, p_target=pA, p_test_target=pA_test, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
+        y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test, ctrain=c_train, train_alpha_values=train_params, p_target=pA, p_test_target=pA_test, epochs=50000, lr=1e-3, weight_decay=1e-4, device=device)
     z_lookup = training_dict["z"]
+    wandb.finish()
     
+    wandb.init(project=wandb_name, config=args)
     #second step
     encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=10)
     frozen_decoder = copy.deepcopy(model.decoder)
