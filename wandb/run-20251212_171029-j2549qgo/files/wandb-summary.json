@@ -1,1 +1,0 @@
-{"_timestamp":1.765558943380356e+09,"_step":10000,"Cross Entropy Loss":0.4990110695362091,"kl_loss":-3.496851682662964,"accuracy_test":0.7359116077423096,"Correlation original params & latents":0.02862594841051197,"_wandb":{"runtime":3211},"_runtime":3211.19807473}

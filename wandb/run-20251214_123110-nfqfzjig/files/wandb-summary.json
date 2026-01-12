@@ -1,1 +1,0 @@
-{"_wandb":{"runtime":47},"_runtime":47.234004814,"_step":10000,"Cross Entropy Loss":0.49101415276527405,"Cross Entropy Test Loss":0.4917321801185608,"accuracy_test":0.7358750104904175,"Correlation original params & latents":0.5085951213114402,"_timestamp":1.7657119183597004e+09}
