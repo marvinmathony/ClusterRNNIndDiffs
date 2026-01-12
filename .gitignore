@@ -4,6 +4,7 @@ plots/
 checkpoints/
 runs/
 runs_vanilla/
+wandb/
 
 # Python cache files
 __pycache__/
