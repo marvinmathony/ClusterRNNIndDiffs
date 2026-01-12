@@ -3,10 +3,17 @@ import os
 import numpy as np
 from itertools import combinations
 import json
+import argparse
 
-latent = True
+parser = argparse.ArgumentParser(description="Select best epoch by RSA")
+parser.add_argument('--latent', type=bool, default=True, help="latent or vanilla modeling")
+parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
+args = parser.parse_args()
 
-BASE_DIR = "runs" if latent else "runs_vanilla"
+latent = args.latent
+DATASET_ID = args.dataset_id
+
+BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 SEEDS = [12,50,76,100,142]  # or read from args
 
 def list_epochs_for_seed(seed):

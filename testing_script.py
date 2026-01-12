@@ -5,21 +5,49 @@ import numpy as np
 from modelsandtraining import *
 import RL_fittingfunctions2 as fit
 import pickle
-from run_Q_model import xin_test, c_test, xin_train, c_train, df_train, df_test, n_fit_iter, vanilla_nametag, latent_nametag, session_ll_df_test, device
+import argparse
+import pandas as pd
 
-#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Parse arguments
+parser = argparse.ArgumentParser(description="Test trained models")
+parser.add_argument('--latent', type=bool, default=True, help="latent or vanilla modeling")
+parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
+parser.add_argument('--model_fitting', type=bool, default=False, help="whether to fit cognitive models")
+args = parser.parse_args()
 
 ############################
 #### LOAD CORRECT MODEL ####
 ############################
-latent = True
-model_fitting = False
+latent = args.latent
+DATASET_ID = args.dataset_id
+model_fitting = args.model_fitting
 palminteri = False
 sloutsky = False
 
+DATA_DIR = f"data_dataset{DATASET_ID}"
+n_fit_iter = 5
+vanilla_nametag = "vanilla"
+latent_nametag = "latentmodel"
 
-BASE_DIR = "runs" if latent else "runs_vanilla"
-#SEED_FOR_ANALYSIS = 50  # pick one seed as “representative” or the best seed by behavior
+# Load data
+df_train = pd.read_csv(f"{DATA_DIR}/df_train.csv")
+df_test = pd.read_csv(f"{DATA_DIR}/df_test.csv")
+session_ll_df_test = pd.read_csv(f"{DATA_DIR}/session_ll_df_test.csv")
+
+xin_train = np.load(f"{DATA_DIR}/xin_train.npy")
+xin_test = np.load(f"{DATA_DIR}/xin_test.npy")
+c_test = np.load(f"{DATA_DIR}/c_test.npy")
+c_train = np.load(f"{DATA_DIR}/c_train.npy")
+
+xin_train = torch.from_numpy(xin_train).float().to(device)
+xin_test = torch.from_numpy(xin_test).float().to(device)
+c_test = torch.from_numpy(c_test).float().to(device)
+c_train = torch.from_numpy(c_train).float().to(device)
+
+
+BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 
 # Load best epoch
 with open(os.path.join(BASE_DIR, "best_epoch_by_rsa.json"), "r") as f:
@@ -71,20 +99,22 @@ if latent:
     df = pd.DataFrame([{
         "model": "IDRNN",
         "geometric_mean_prob_rnn": geometric_mean_prob_rnn,
-        "geometric_mean_prob_common_process": geometric_mean_prob_common_process
+        "geometric_mean_prob_common_process": geometric_mean_prob_common_process,
+        "dataset_id": DATASET_ID
     }])
 
-    out_path = "data/latent_results.csv"
+    out_path = f"{DATA_DIR}/latent_results.csv"
 
 else:
     print(f"normalized_ll vanilla: {geometric_mean_prob_rnn}")
 
     df = pd.DataFrame([{
         "model": "vanillaRNN",
-        "geometric_mean_prob_rnn": geometric_mean_prob_rnn
+        "geometric_mean_prob_rnn": geometric_mean_prob_rnn,
+        "dataset_id": DATASET_ID
     }])
 
-    out_path = "data/vanilla_results.csv"
+    out_path = f"{DATA_DIR}/vanilla_results.csv"
 
 
 # --- Append to CSV or create it if missing ---
@@ -108,17 +138,17 @@ if model_fitting:
     )
     
 
-    with open("data/params_dict.pkl", "wb") as f:
+    with open(f"{DATA_DIR}/params_dict.pkl", "wb") as f:
         pickle.dump(params_dict, f)
 
     df = pd.DataFrame({
     "model": list(params_dict.keys()),
     "params": [list(v) for v in params_dict.values()]})
 
-    df.to_csv("data/params_dict.csv", index=False)
+    df.to_csv(f"{DATA_DIR}/params_dict.csv", index=False)
 
-    np.savez(f"data/q_common_dict.npz", **q_common_dict)
-    print(f"q value dict saved under data/q_common_dict.npz ✅")
+    np.savez(f"{DATA_DIR}/q_common_dict.npz", **q_common_dict)
+    print(f"q value dict saved under {DATA_DIR}/q_common_dict.npz ✅")
 
     print(f"model_eval_Q_df: {model_eval_Q_df}")
     print(f"session_ll_df_test: {session_ll_df_test}")
@@ -133,46 +163,42 @@ if model_fitting:
 
 
     # Save p1 values (for later plotting)
-    np.savez("data/p1_common_dict.npz", **p1_common_dict)
+    np.savez(f"{DATA_DIR}/p1_common_dict.npz", **p1_common_dict)
 
 if latent:
-    rnn_df.to_csv(f"data/rnn_results{latent_nametag}.csv", index=False)
-    rnn_no_id.to_csv(f"data/rnn_results_common_process.csv", index=False)
+    rnn_df.to_csv(f"{DATA_DIR}/rnn_results{latent_nametag}.csv", index=False)
+    rnn_no_id.to_csv(f"{DATA_DIR}/rnn_results_common_process.csv", index=False)
     if palminteri:
-        torch.save(latent_tensor, f"data/latents_tensor{latent_nametag}_palminteri.pt")
-        torch.save(latent_tensor_train, f"data/latents_tensor{latent_nametag}_palminteri_traindata.pt")
-        print(f"latent tensor with dim {latent_tensor.shape} saved under data/latents_tensor_palminteri.pt")
-        model_eval_df.to_csv(f"data/model_eval_df{latent_nametag}.csv", index=False)
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{latent_nametag}_palminteri.pt")
+        torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{latent_nametag}_palminteri_traindata.pt")
+        print(f"latent tensor with dim {latent_tensor.shape} saved under {DATA_DIR}/latents_tensor_palminteri.pt")
+        model_eval_df.to_csv(f"{DATA_DIR}/model_eval_df{latent_nametag}.csv", index=False)
     elif sloutsky:
-        torch.save(latent_tensor, f"data/latents_tensor{latent_nametag}_sloutsky.pt")
-        torch.save(latent_tensor_train, f"data/latents_tensor{latent_nametag}_sloutsky_traindata.pt")
-        print(f"latent tensor with dim {latent_tensor.shape} saved under data/latents_tensor_sloutsky.pt")
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{latent_nametag}_sloutsky.pt")
+        torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{latent_nametag}_sloutsky_traindata.pt")
+        print(f"latent tensor with dim {latent_tensor.shape} saved under {DATA_DIR}/latents_tensor_sloutsky.pt")
     else:
-        torch.save(latent_tensor, f"data/latents_tensor{latent_nametag}{SEED_FOR_ANALYSIS}.pt")
-        torch.save(latent_tensor_train, f"data/latents_tensor{latent_nametag}_traindata.pt")
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{latent_nametag}{SEED_FOR_ANALYSIS}.pt")
+        torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{latent_nametag}_traindata.pt")
         if model_fitting:
 
-            model_eval_df.to_csv(f"data/model_eval_df{latent_nametag}.csv", index=False)
+            model_eval_df.to_csv(f"{DATA_DIR}/model_eval_df{latent_nametag}.csv", index=False)
 
-    #torch.save(save_dict, f"checkpoints/ablated_rnn_best{latent_nametag}.pt")
-    #torch.save(model.state_dict(), f"checkpoints/ablated_rnn{latent_nametag}.pt")
-    #np.savez(f"data/pA_rnn_dict{latent_nametag}.npz", **pA_rnn_dict)
-    #np.save(f"data/training_dict{latent_nametag}.npy", training_dict)
 else:
-    rnn_df.to_csv(f"data/rnn_results{vanilla_nametag}.csv", index=False)
+    rnn_df.to_csv(f"{DATA_DIR}/rnn_results{vanilla_nametag}.csv", index=False)
     if palminteri:
 
-        torch.save(latent_tensor, "data/latents_tensor_palminteri.pt")
-        model_eval_df.to_csv("data/model_eval_df.csv", index=False)
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor_palminteri.pt")
+        model_eval_df.to_csv(f"{DATA_DIR}/model_eval_df.csv", index=False)
     elif sloutsky:
-        torch.save(latent_tensor, f"data/latents_tensor{vanilla_nametag}_sloutsky.pt")
-        torch.save(latent_tensor_train, f"data/latents_tensor{vanilla_nametag}_sloutsky_traindata.pt")
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{vanilla_nametag}_sloutsky.pt")
+        torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{vanilla_nametag}_sloutsky_traindata.pt")
     else:
-        torch.save(latent_tensor, f"data/latents_tensor{vanilla_nametag}{SEED_FOR_ANALYSIS}.pt")
-        print(f"latent saved under data/latents_tensor{vanilla_nametag}{SEED_FOR_ANALYSIS}.pt")
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{vanilla_nametag}{SEED_FOR_ANALYSIS}.pt")
+        print(f"latent saved under {DATA_DIR}/latents_tensor{vanilla_nametag}{SEED_FOR_ANALYSIS}.pt")
         if model_fitting:
 
-            model_eval_df.to_csv(f"data/model_eval_df{vanilla_nametag}.csv", index=False)
+            model_eval_df.to_csv(f"{DATA_DIR}/model_eval_df{vanilla_nametag}.csv", index=False)
 
     ### insted of the below, do this during training for the vanilla model ###
     #torch.save(save_dict, "checkpoints/ablated_rnn_best.pt")

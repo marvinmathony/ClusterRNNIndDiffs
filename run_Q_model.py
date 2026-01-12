@@ -90,40 +90,28 @@ elif sloutsky:
 
 
 else:
-    # --- Load CSVs ---
-    df_train = pd.read_csv("data/df_train.csv")
-    df_test = pd.read_csv("data/df_test.csv")
-    session_ll_df_test = pd.read_csv("data/session_ll_df_test.csv")
-    test_parameter_df = pd.read_csv("data/true_test_parameter_values.csv")
-    train_parameter_df = pd.read_csv("data/true_parameter_values.csv")
-
-    # --- Load NumPy arrays ---
-    xin_train = np.load("data/xin_train.npy")
-    xin_test = np.load("data/xin_test.npy")
-    choice_one_hot_train = np.load("data/choice_one_hot_train.npy")
-    choice_one_hot_test = np.load("data/choice_one_hot_test.npy")
-    c_test = np.load("data/c_test.npy")
-    pA = np.load("data/pA_train.npy")
-    pA_test = np.load("data/pA_test.npy")
-    c_train = np.load("data/c_train.npy")
-    c_train = torch.from_numpy(c_train).float().to(device)
-    alphaP_test = test_parameter_df["alphaP_list"].to_numpy()
-    params = test_parameter_df["alphaP_list"].values
-    alphaP_train = train_parameter_df["alphaP_list"].to_numpy()
-    params_train = train_parameter_df["alphaP_list"].values
+    # This will be updated in __main__ section to use DATA_DIR
+    df_train = None
+    df_test = None
+    session_ll_df_test = None
+    test_parameter_df = None
+    train_parameter_df = None
+    xin_train = None
+    xin_test = None
+    choice_one_hot_train = None
+    choice_one_hot_test = None
+    c_test = None
+    pA = None
+    pA_test = None
+    c_train = None
+    alphaP_test = None
+    params = None
+    alphaP_train = None
+    params_train = None
 
 
 
-# Convert to tensors
-xin_train = torch.from_numpy(xin_train).float().to(device)
-choice_one_hot_train = torch.from_numpy(choice_one_hot_train).float().to(device)
-choice_one_hot_test = torch.from_numpy(choice_one_hot_test).float().to(device)
-pA = torch.from_numpy(pA).float().to(device)
-pA_test = torch.from_numpy(pA_test).float().to(device)
-xin_test = torch.from_numpy(xin_test).float().to(device)
-c_test = torch.from_numpy(c_test).float().to(device)
-B, T, in_dim = xin_train.shape
-B_test, T_test, in_dim_test = xin_test.shape
+# Data loading will be done in __main__ section
 
 
 
@@ -135,13 +123,55 @@ if __name__ == '__main__':
     parser.add_argument('--z', type=int, help="dimension of latent space", default=1.)
     parser.add_argument('--seed', type=int, help="random seed", default=42.)
     parser.add_argument('--latent', type=bool, help="latent or vanilla modeling", default=False)
+    parser.add_argument('--dataset_id', type=int, help="dataset ID for multi-dataset experiments", default=0)
     args = parser.parse_args()
+
+    DATASET_ID = args.dataset_id
+    DATA_DIR = f"data_dataset{DATASET_ID}"
+    PLOT_DIR = f"plots_dataset{DATASET_ID}"
 
     wandb_name = "RNNIndDiffs"
 
+    # Load data with dataset_id
+    if not (palminteri or sloutsky):
+        # --- Load CSVs ---
+        df_train = pd.read_csv(f"{DATA_DIR}/df_train.csv")
+        df_test = pd.read_csv(f"{DATA_DIR}/df_test.csv")
+        session_ll_df_test = pd.read_csv(f"{DATA_DIR}/session_ll_df_test.csv")
+        test_parameter_df = pd.read_csv(f"{DATA_DIR}/true_test_parameter_values.csv")
+        train_parameter_df = pd.read_csv(f"{DATA_DIR}/true_parameter_values.csv")
+
+        # --- Load NumPy arrays ---
+        xin_train = np.load(f"{DATA_DIR}/xin_train.npy")
+        xin_test = np.load(f"{DATA_DIR}/xin_test.npy")
+        choice_one_hot_train = np.load(f"{DATA_DIR}/choice_one_hot_train.npy")
+        choice_one_hot_test = np.load(f"{DATA_DIR}/choice_one_hot_test.npy")
+        c_test = np.load(f"{DATA_DIR}/c_test.npy")
+        pA = np.load(f"{DATA_DIR}/pA_train.npy")
+        pA_test = np.load(f"{DATA_DIR}/pA_test.npy")
+        c_train = np.load(f"{DATA_DIR}/c_train.npy")
+
+        alphaP_test = test_parameter_df["alphaP_list"].to_numpy()
+        params = test_parameter_df["alphaP_list"].values
+        alphaP_train = train_parameter_df["alphaP_list"].to_numpy()
+        params_train = train_parameter_df["alphaP_list"].values
+
+        # Convert to tensors
+        xin_train = torch.from_numpy(xin_train).float().to(device)
+        choice_one_hot_train = torch.from_numpy(choice_one_hot_train).float().to(device)
+        choice_one_hot_test = torch.from_numpy(choice_one_hot_test).float().to(device)
+        pA = torch.from_numpy(pA).float().to(device)
+        pA_test = torch.from_numpy(pA_test).float().to(device)
+        xin_test = torch.from_numpy(xin_test).float().to(device)
+        c_test = torch.from_numpy(c_test).float().to(device)
+        c_train = torch.from_numpy(c_train).float().to(device)
+
+        B, T, in_dim = xin_train.shape
+        B_test, T_test, in_dim_test = xin_test.shape
+
     os.makedirs("checkpoints", exist_ok=True)
-    os.makedirs("plots", exist_ok=True)
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(PLOT_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 
 
@@ -157,7 +187,7 @@ if __name__ == '__main__':
 
 
     # directories for model checkpoints and RSA's
-    BASE_DIR = "runs" if latent else "runs_vanilla"
+    BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
     run_dir = os.path.join(BASE_DIR, f"seed_{seed_value}")
     ckpt_dir = os.path.join(run_dir, "checkpoints")
     rsa_dir  = os.path.join(run_dir, "rsa")
@@ -175,6 +205,15 @@ if __name__ == '__main__':
     A = 2
     hidden = 10
     epochs = 10000
+
+    # Get dimensions from loaded data
+    if not (palminteri or sloutsky):
+        in_dim = xin_train.shape[2]
+        B = xin_train.shape[0]
+        B_test = xin_test.shape[0]
+        T = xin_train.shape[1]
+        T_test = xin_test.shape[1]
+        in_dim_test = xin_test.shape[2]
 
 
     wandb.init(project=wandb_name, config=args)
