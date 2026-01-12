@@ -4,6 +4,7 @@ import math
 import numpy as np
 import wandb
 import plot_functions as plf
+import os
 
 class Decoder(nn.Module):
     def __init__(self, in_dim, z_dim, hid, A=2):
@@ -323,6 +324,7 @@ def train_latentrnn_noblocks(
     y_onehot: torch.Tensor,            # (B, T, A) one-hot
     X_test: torch.Tensor,
     y_test_onehot: torch.Tensor,
+    train_alpha_values,
     p_target: torch.Tensor = None,     # (B, T) prob(arm0), optional
     p_test_target: torch.Tensor = None,
     epochs: int = 5000,
@@ -377,6 +379,7 @@ def train_latentrnn_noblocks(
         acc = (preds == targets).float().mean().item()
         accuracy.append(acc)
 
+        model.eval()
         # KL monitoring (optional)
         if p_target is not None:
             model.eval()
@@ -389,6 +392,15 @@ def train_latentrnn_noblocks(
                     best_kl = kl
                     best_epoch = ep
                     best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        with torch.no_grad():
+
+            z_expanded = z.unsqueeze(1).expand(-1, X_train.size(1), -1)
+            distance_matrix_latents, latents_order = plf.rsa_latents(latents = z_expanded, metric="euclidean",title="training_run_latentmodel", reduction="last", plot=False, original_data=False)
+            distance_matrix_params, params_order = plf.rsa_latents(latents = train_alpha_values, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True)
+            vec_params  = vectorize_rsa(distance_matrix_params)
+            vec_latents = vectorize_rsa(distance_matrix_latents)
+            corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
+            wandb.log({"training accuracy CP": acc, "Correlation original params & latents CP": corr_matrix}, step=ep)
         
         # test 
         if p_test_target is not None:
@@ -545,7 +557,7 @@ def test_latentrnn_secondstep_causal_posterior_weighting(model, blocks, y, N=100
 
 
 # --- Compute RNN likelihoods ---
-def compute_rnn_likelihoods_torch(test_function, model, test_xin, choice_test, train_xin, latent, choice_train=None, N=500, id=True):
+def compute_rnn_likelihoods_torch(test_function, model, test_xin, choice_test, train_xin, latent, choice_train=None, N=200, id=True):
     rnn_results = []
     B, T = choice_test.shape
     with torch.no_grad():
@@ -570,7 +582,7 @@ def compute_rnn_likelihoods_torch(test_function, model, test_xin, choice_test, t
             norm_ll = (ll_per_participant / T).exp()  # Normalize and convert to probabilities
             rnn_results.append(pd.DataFrame({
                 "session": np.arange(B),
-                "normalized_likelihood": norm_ll.cpu().numpy(),
+                "normalized_likelihood": -ll_per_participant.cpu().numpy(), #change back to norm_ll if need be
                 "model": "IDRNN" if id else "common_process_RNN",#"LatentRNN_causalIW" - change code to implement other names as well
             }))
             return pd.concat(rnn_results, ignore_index=True), latent_tensor, latent_tensor_train, geometric_mean_per_trial_test
@@ -594,7 +606,7 @@ def compute_rnn_likelihoods_torch(test_function, model, test_xin, choice_test, t
             #print(f"norm_ll mean: {norm_ll.sum()/B}")
             rnn_results.append(pd.DataFrame({
                 "session": np.arange(B),
-                "normalized_likelihood": norm_ll.cpu().numpy(),
+                "normalized_likelihood": -log_ll_per_session.cpu().numpy(), #change back to norm_ll if needed
                 #"normalized_likelihood_per_trial": normalized_ll_per_trial,
                 "model": "vanillaRNN"
             }))
@@ -663,9 +675,9 @@ def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val,
         # randomly pick a prefix length to simulate causal training
         max_len = blocks.size(2)
         prefix_len = np.random.randint(5, max_len+1)  # random length
-        blocks_prefix = blocks[:, :, :prefix_len, :]
-        xenc_prefix = xenc[:, :, :prefix_len, :]
-        y_prefix = y[:, :, :prefix_len]
+        blocks_prefix = blocks#[:, :, :prefix_len, :]
+        xenc_prefix = xenc#[:, :, :prefix_len, :]
+        y_prefix = y#[:, :, :prefix_len]
         #p_target_prefix = p_target[:,:prefix_len]
 
         logits, mu, lv, z, h0_ = model(xenc_prefix, blocks_prefix, sample_z=False)
@@ -755,7 +767,7 @@ def train_latentrnn_IDRNN_palminteri(model, xenc, blocks, y, lookup_z, xenc_val,
         #val_elbos.append(val_loss)
     return model, mu_best, lv_best, train_elbos, val_elbos, training_dict, pA_per_epoch
 
-def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, device, ctest, ctrain,alpha_values_test, epochs=60, patience = 300, lr=1e-3, window_size=40, lmbd = 0.5):
+def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_target, device, ctest, ctrain,alpha_values_test, checkpoint_dir, rsa_dir, loss_dir, epochs=60, patience = 300, lr=1e-3, window_size=40, lmbd = 0.5):
     #print(f"x_enc shape: {xenc.shape}, blocks shape: {blocks.shape}, y shape: {y.shape}")
     #xenc input must have shape (B, B_blk, T, in_dim)
     train_elbos = []
@@ -773,6 +785,7 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
     val_accuracy_dict = {}
     val_acc_history = []
     model_state_dict = {}
+    best_RSA_corr = 0
     
     # freeze decoder
     for p in model.decoder.parameters():
@@ -822,6 +835,8 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         val_policy_loss, val_nll = elbo_lossZ(val_logits, yval_prefix)
         val_loss, kl_loss = step_two_loss(lmbd, mu, lv, lookup_z, val_policy_loss)
         val_elbos.append(val_loss.item())
+
+
 
   
 
@@ -873,18 +888,25 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         #model_state_dict[ep] = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
         if ep % 100 == 0 or ep == 1:
-            ckpt_path = f"checkpoints/IDRNN_epoch_{ep:04d}.pt"
+            ckpt_path = os.path.join(checkpoint_dir, f"epoch{ep:04d}.pt")
             torch.save(model.state_dict(), ckpt_path)
+            # save this externally in folder for run 1-5 (structured after seeds)
             print(f"[{model.name}], epoch {ep:3d},  train loss {loss.item():.3f},  val loss {val_loss.item():.3f},  train_acciracy: {final_acc},  val_accuracy: {final_val_acc}")
             # roll out the model for testing here (just use current model state and call the posterior sampling function)
             # collect latents (from the model and also the original parameters - the latter will have to be passed to the training function as an argument)
             # run RSA on both and compute correlation. Log the correlation 
             _, latent_tensor, _, _ = compute_rnn_likelihoods_torch(test_latentrnn_secondstep_causal_posterior_weighting, model, xenc_val.squeeze(1), ctest, xenc.squeeze(1), latent=True, choice_train=None, id=True)
-            distance_matrix_latents = plf.rsa_latents(latents = latent_tensor, metric="euclidean",title="training_run_latentmodel", reduction="last", plot=False, original_data=False)
-            distance_matrix_params = plf.rsa_latents(latents = alpha_values_test, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True)
+            distance_matrix_latents, latent_order = plf.rsa_latents(latents = latent_tensor, metric="euclidean",title="training_run_latentmodel", reduction="last", plot=False, original_data=False,cluster_order=False)
+            distance_matrix_params, params_order = plf.rsa_latents(latents = alpha_values_test, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True, cluster_order=False)
             vec_params  = vectorize_rsa(distance_matrix_params)
             vec_latents = vectorize_rsa(distance_matrix_latents)
+            #save latent RSA at each checkpoint in the same folder logic as checkpoints (folder 1-5, structured after seeds)
+            rsa_path = os.path.join(rsa_dir, f"epoch_{ep:04d}.npy")
+            np.save(rsa_path, vec_latents)
             corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
+            # log the training loss as well
+            loss_path = os.path.join(loss_dir, f"epoch_{ep:04d}.npy")
+            np.save(loss_path, loss.cpu().item())
             
 
         if final_val_acc > best_val_acc:
@@ -895,13 +917,10 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
         
         wandb.log({"Cross Entropy Loss": val_policy_loss, "kl_loss": kl_loss, "accuracy_test": final_val_acc, "Correlation original params & latents": corr_matrix}, step=ep)
 
-        """if val_loss.item() < best_val_loss:
-            best_val_loss = val_loss.item()
-            best_val_loss_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-            epochs_no_improve = 0
+        if corr_matrix > best_RSA_corr:
+            best_RSA_corr = corr_matrix
+            best_RSA_corr_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
             
-        else:
-            epochs_no_improve += 1"""
 
         
             
@@ -915,7 +934,7 @@ def train_latentrnn_IDRNN(model, xenc, blocks, y, lookup_z, xenc_val, y_val, p_t
     smoothed_val_acc = np.convolve(val_acc_history, np.ones(window)/window, mode='valid')
     best_epoch = np.argmax(smoothed_val_acc) + window // 2
     best_model_state = model_state_dict[best_epoch]"""
-    model.load_state_dict(best_val_acc_state)
+    model.load_state_dict(best_RSA_corr_state)
 
 
     print(f"best model state at epoch {best_epoch} with acc: {best_val_acc}")
@@ -1026,7 +1045,7 @@ def train_ablated_noblocks_palminteri(model, X_train, y_train, X_val, y_val, epo
             "best_val_acc": best_val_acc}
     return model, train_elbos, val_elbos, kl_vals, pA_per_epoch, training_dict
 
-def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctest, ctrain, alpha_values_test, p_target=None, p_test = None, epochs=5000, lr=0.001):
+def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctest, ctrain, alpha_values_test, checkpoint_dir, rsa_dir, loss_dir, p_target=None, p_test = None, epochs=5000, lr=0.001):
     train_elbos = []
     val_elbos = []
     kl_vals = []
@@ -1072,7 +1091,7 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctes
 
         """if ep % 50 == 0:
             print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}")"""
-
+        
         # === KL Divergence Monitoring ===
         model.eval()
         with torch.no_grad():
@@ -1124,16 +1143,23 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctes
                 best_test_epoch_kl = ep"""
 
             if ep % 100 == 0 or ep == 1:
+                ckpt_path = os.path.join(checkpoint_dir, f"epoch{ep:04d}.pt")
+                torch.save(model.state_dict(), ckpt_path)
                 print(f"Epoch {ep:3d}  Train loss {nll.item():.3f}  KL {kl:.3f}  accuracy {acc}  test loss {nll_test}  test accuracy {acc_test}  test kl {kl_test}")
                 # roll out the model for testing here (just use current model state and call the posterior sampling function)
                 # collect latents (from the model and also the original parameters - the latter will have to be passed to the training function as an argument)
                 # run RSA on both and compute correlation. Log the correlation 
                 _, latent_tensor, _, _ = compute_rnn_likelihoods_torch(test_latentrnn_secondstep_causal_posterior_weighting, model, X_test, ctest, X_train, latent=False, choice_train=ctrain, id=False)
-                distance_matrix_latents = plf.rsa_latents(latents = latent_tensor, metric="euclidean",title="training_run_vanilla", reduction="avg", plot=False, original_data=False)
-                distance_matrix_params = plf.rsa_latents(latents = alpha_values_test, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True)
+                distance_matrix_latents, latent_order = plf.rsa_latents(latents = latent_tensor, metric="euclidean",title="training_run_vanilla", reduction="avg", plot=False, original_data=False, cluster_order= False)
+                distance_matrix_params, params_order = plf.rsa_latents(latents = alpha_values_test, metric="euclidean",title="test_params", reduction="entire", plot=False, original_data=True, cluster_order=False)
                 vec_params  = vectorize_rsa(distance_matrix_params)
                 vec_latents = vectorize_rsa(distance_matrix_latents)
                 corr_matrix = np.corrcoef(vec_params,vec_latents)[0,1]
+                rsa_path = os.path.join(rsa_dir, f"epoch_{ep:04d}.npy")
+                np.save(rsa_path, vec_latents)
+                # log the training loss as well
+                loss_path = os.path.join(loss_dir, f"epoch_{ep:04d}.npy")
+                np.save(loss_path, nll.cpu().item())
         
             wandb.log({"Cross Entropy Loss": nll, "Cross Entropy Test Loss": nll_test, "accuracy_test": acc_test, "Correlation original params & latents": corr_matrix}, step=ep)       
 

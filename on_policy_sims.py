@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import tensorflow as tf
+#import tensorflow as tf
 import torch, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
 from tqdm import tqdm
 import RL_fitting_functions as fit

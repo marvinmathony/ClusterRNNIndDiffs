@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
+from scipy.special import logsumexp
+from scipy.stats import truncnorm
 
 # def qlearning_full(param, sessions, choices, rewards, context, model_config):
 #     """
@@ -650,6 +652,10 @@ def compute_negll_and_normalized_ll_per_session_individual_fit(opt_function, par
         param = params_per_session.get(session)
         if param is None:
             raise ValueError(f"Parameters for session {session} are not provided.")
+        
+        idxs = get_param_indices(model_fit)   # careful: here you pass model_fit = model_config
+        alpha_idx = idxs["alpha"]
+        print(f"[DEBUG] Session {session}: alpha used in LL = {param[alpha_idx]}")
 
         # Compute negative log-likelihood with ALL trials
         neg_ll, _ = opt_function(param, sessions, choices, rewards, context, model_fit)
@@ -662,7 +668,7 @@ def compute_negll_and_normalized_ll_per_session_individual_fit(opt_function, par
         session_results.append({
             "session": session,
             "neg_log_likelihood": neg_ll,
-            "normalized_likelihood": normalized_ll
+            "normalized_likelihood": neg_ll ##changed back to normalized ll if need be
         })
 
     return pd.DataFrame(session_results)
@@ -701,7 +707,7 @@ def compute_negll_and_normalized_ll_per_session_common_fit(opt_function, common_
         session_results.append({
             "session": session,
             "neg_log_likelihood": neg_ll,
-            "normalized_likelihood": normalized_ll
+            "normalized_likelihood": neg_ll # change back to normalized ll if need be
         })
 
     return pd.DataFrame(session_results)
@@ -719,81 +725,7 @@ import pandas as pd
 from scipy.optimize import minimize
 
 
-def qlearning_full_with_prior(param, sessions, choices, rewards, context=None, model_config=None):
-    """
-    Q-learning function with priors for computing log-posterior (MAP).
-    Uses `qlearning_full` for value updating and adds prior probability.
 
-    Parameters:
-    - param: Model parameters to estimate.
-    - sessions: Array of session identifiers.
-    - choices: Array of choices made.
-    - rewards: Array of rewards received.
-    - context: Array of context identifiers (optional).
-    - model_config (dict): Configuration dictionary.
-
-    Returns:
-    - Negative log-posterior (MAP).
-    - p1_series: Probability of choosing option 1 for each trial.
-    """
-    # Extract model configuration
-    asymmetric_alpha = model_config.get("asymmetric_alpha", False)
-    forgetting_type = model_config.get("forgetting_type", "none")
-    choice_trace = model_config.get("choice_trace", False)
-    init_Q_free = model_config.get("init_Q_free", False)  
-
-    # Extract parameters and apply priors
-    idx = 0
-    prior_log_prob = 0  # Initialize prior log-probability
-
-    if init_Q_free:
-        idx += 2
-
-    # Alpha parameters
-    if asymmetric_alpha:
-        alphaP = np.clip(param[idx], 1e-3, 1 - 1e-3)
-        prior_log_prob += beta_dist.logpdf(alphaP, a=1.1, b=1.1)
-        idx += 1
-        alphaN = np.clip(param[idx], 1e-3, 1 - 1e-3)
-        prior_log_prob += beta_dist.logpdf(alphaN, a=1.1, b=1.1)
-        idx += 1
-    else:
-        alpha = np.clip(param[idx], 1e-3, 1 - 1e-3)
-        prior_log_prob += beta_dist.logpdf(alpha, a=1.1, b=1.1)
-        idx += 1
-
-    # Forgetting rate
-    if forgetting_type == "free":
-        alphaF = np.clip(param[idx], 1e-3, 1 - 1e-3)
-        prior_log_prob += beta_dist.logpdf(alphaF, a=1.1, b=1.1)
-        idx += 1
-    elif forgetting_type == "fixed":
-        alphaF = alpha if not asymmetric_alpha else (alphaP + alphaN) * 0.5
-    else:
-        alphaF = 0.0
-
-    # Beta parameter (inverse temperature)
-    beta = np.clip(param[idx], 1e-3, 20)
-    prior_log_prob += gamma_dist.logpdf(beta, a=1.2, scale=5.0)
-    idx += 1
-
-    # Choice trace parameters
-    if choice_trace:
-        phi = param[idx]
-        prior_log_prob += norm.logpdf(phi, loc=0, scale=np.sqrt(5))
-        idx += 1
-        tau = np.clip(param[idx], 1e-3, 1 - 1e-3)
-        prior_log_prob += beta_dist.logpdf(tau, a=1.1, b=1.1)
-        idx += 1
-    else:
-        phi = 0.0
-        tau = 0.0
-
-    # Compute log-likelihood using `qlearning_full`
-    neg_ll, p1_series = qlearning_full(param, sessions, choices, rewards, context, model_config)
-
-    # Return negative log-posterior (log-likelihood + log-prior)
-    return neg_ll - prior_log_prob, p1_series
 
 
 def fit_qlearning_by_session_MAP(df, model_config, n_iter=10):
@@ -1004,6 +936,7 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
             common_params, common_neg_ll, p1_common = fit_qlearning_common(
                 df_train, model_config=model_config, n_iter=n_iter
             )
+            print(f"common params: {common_params}")
 
             p1_common_dict[model_name] = p1_common
             params_dict[f"{model_name}_common"] = common_params
@@ -1044,14 +977,70 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
 
         # Fit individual parameters for each session (MAP)
         if fit_MAP:
-            print("  Fit individual parameters (MAP)")
-            session_results_df, p1_MAP = fit_qlearning_by_session_MAP(
-                df_train, model_config=model_config, n_iter=n_iter
-            )
-            params_per_session_MAP = {row['session']: row['params'] for _, row in session_results_df.iterrows()}
-            params_dict[f"{model_name}_MAP"] = params_per_session_MAP
-            p1_MAP_dict[model_name] = p1_MAP
 
+            ### fitting part
+            #should work
+            m, v, eta_vec, var_vec, m_history, v_history = run_empirical_bayes(df_train, model_config, common_params, n_iter=50)
+            print(f"eta vector: {eta_vec}")
+            print(f"population mean history: {m}")
+
+            params_per_session_MAP = infer_params_for_test_EM(df_test, m, v, common_params, model_config)
+            #print(f"after fitting MAP, individual params for session 1 are {params_per_session_MAP[1]}")
+            #sanity checks
+            test_session = df_test['session'].unique()[0]
+            group = df_test[df_test['session'] == test_session]
+
+            sessions = np.full_like(group['c'].values, test_session)
+            choices  = group['c'].values
+            rewards  = group['r'].values
+            context  = group['context'].values if 'context' in group.columns else None
+
+            param_common = common_params
+            param_EM     = params_per_session_MAP[test_session]
+
+            neg_ll_common, _ = qlearning_full(param_common, sessions, choices, rewards, context, model_config)
+            neg_ll_EM, _     = qlearning_full(param_EM,     sessions, choices, rewards, context, model_config)
+
+            print(f"\nSession {test_session}:")
+            print(f"  common fit neg LL = {neg_ll_common}")
+            print(f"  EM α only  neg LL = {neg_ll_EM}")
+            print(f"  difference        = {neg_ll_common - neg_ll_EM}")
+
+            print("Type of params_per_session_MAP:", type(params_per_session_MAP))
+            first_key = list(params_per_session_MAP.keys())[0]
+            print("Example session key:", first_key)
+            print("Example param vector:", params_per_session_MAP[first_key])
+            print("Shape:", np.array(params_per_session_MAP[first_key]).shape)
+            idxs = get_param_indices(model_config)
+
+            print("Param index mapping:", idxs)
+            alpha_idx = idxs["alpha"]
+            print("Alpha index:", alpha_idx)
+
+            print("Common params:", common_params)
+            print("Common alpha:", common_params[alpha_idx])
+
+            for s, p in list(params_per_session_MAP.items())[:5]:
+                print(f"Session {s}: alpha = {p[alpha_idx]}")
+
+            alphas = np.array([p[alpha_idx] for p in params_per_session_MAP.values()])
+            print("Unique alphas (rounded):", np.unique(np.round(alphas, 3)))
+            betas = np.array([p[1] for p in params_per_session_MAP.values()])
+            print("Unique betas (rounded):", np.unique(np.round(betas, 3)))
+            for p in params_per_session_MAP.values():
+                if len(p) > 2:
+                    FQ = True
+                    phis = np.array(p[2])
+                    taus = np.array(p[3])
+                else:
+                    FQ=False
+            if FQ:
+                print("Unique phis (rounded):", np.unique(np.round(phis, 3)))
+                print("Unique taus (rounded):", np.unique(np.round(taus, 3)))
+
+            
+            params_dict[f"{model_name}_MAP"] = dict(params_per_session_MAP)
+            
             # Compute normalized likelihoods for individual fit on test data (MAP)
             print("  Compute results for individual fit (MAP)")
             results_individual_MAP = compute_negll_and_normalized_ll_per_session_individual_fit(
@@ -1068,3 +1057,355 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
     final_results = pd.concat(model_results_dict.values(), ignore_index=True) if model_results_dict else pd.DataFrame()
 
     return final_results, params_dict, p1_common_dict, p1_ML_dict, p1_MAP_dict, Q_common_dict
+
+
+
+def log_truncnorm_pdf_vectorized(x, mu, var, lower=0.01, upper=1):
+    """Vectorized log-pdf of independent truncated normal variables."""
+    std = np.sqrt(var)
+    a = (lower - mu) / std
+    b = (upper - mu) / std
+    z = (x - mu) / std
+
+    log_pdf = (
+        -np.log(std)
+        + norm.logpdf(z)
+        - np.log(norm.cdf(b) - norm.cdf(a))
+    )
+    return np.sum(log_pdf)
+
+def get_param_indices(model_config):
+    """
+    Return a dict with the index positions of parameters in the param vector,
+    consistent with qlearning_full.
+    """
+    asymmetric_alpha = model_config.get("asymmetric_alpha", False)
+    forgetting_type  = model_config.get("forgetting_type", "none")
+    choice_trace     = model_config.get("choice_trace", False)
+    init_Q_free      = model_config.get("init_Q_free", False)
+
+    idx = 0
+    indices = {}
+
+    if init_Q_free:
+        indices["Q_init_0"] = idx; idx += 1
+        indices["Q_init_1"] = idx; idx += 1
+
+    if asymmetric_alpha:
+        indices["alphaP"] = idx; idx += 1
+        indices["alphaN"] = idx; idx += 1
+    else:
+        indices["alpha"] = idx; idx += 1
+
+    if forgetting_type == "free":
+        indices["alphaF"] = idx; idx += 1
+
+    indices["beta"] = idx; idx += 1
+
+    if choice_trace:
+        indices["phi"] = idx; idx += 1
+        indices["tau"] = idx; idx += 1
+
+    return indices
+
+def set_alpha_in_param(base_param, alpha, model_config):
+    """
+    Return a copy of base_param with the (symmetric) alpha replaced by `alpha`.
+    """
+    param = np.array(base_param, copy=True)
+    idxs = get_param_indices(model_config)
+
+    if "alpha" not in idxs:
+        raise ValueError("Model is not symmetric-alpha (asymmetric_alpha=True). "
+                         "set_alpha_in_param currently only supports symmetric alpha.")
+
+    param[idxs["alpha"]] = alpha
+    return param
+
+def logit(x):
+    x = np.clip(x, 1e-6, 1 - 1e-6)
+    return np.log(x / (1 - x))
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+# MAP log posterior: log likelihood + log prior
+def neg_log_posterior(eta, m, v, base_param, sessions, choices, rewards, context, model_config):
+    alpha = sigmoid(eta)
+    param = set_alpha_in_param(base_param, alpha, model_config)
+    #param['alpha'] = alpha #pseudocode for now!!!
+    neg_ll, _ = qlearning_full(param, sessions, choices, rewards, context, model_config) #qlearning full gives -ll
+    log_prior = norm.logpdf(eta, loc=m, scale=np.sqrt(v))
+    #print(f"Params: {params}, NLL: {-ll}, Prior: {prior}")  # Debug print
+    return neg_ll - log_prior
+
+# MAP log posterior: log likelihood + log prior
+def neg_loglik_fit_individual(eta, m, v, param, sessions, choices, rewards, context, model_config):
+    alpha = sigmoid(eta)
+    param['alpha'] = alpha #pseudocode for now!!!
+    ll = qlearning_full(param, sessions, choices, rewards, context, model_config) #qlearning full gives -ll
+    return -ll
+
+def hessian_1d(fun, theta, eps=1e-5):
+    f_plus  = fun(theta + eps)
+    f_0     = fun(theta)
+    f_minus = fun(theta - eps)
+    H = (f_plus - 2 * f_0 + f_minus) / (eps ** 2)
+    return H
+
+def hessian3d(data, m, v, eps, h_i):
+    H = np.zeros((3, 3))  # Hessian matrix for 3 parameters (w1, w2, w3)
+    for j in range(3):
+        for k in range(3):
+            e_j = np.zeros(3); e_k = np.zeros(3)
+            e_j[j] = eps; e_k[k] = eps
+            f1 = neg_log_posterior(h_i + e_j + e_k, data, m, v)
+            f2 = neg_log_posterior(h_i + e_j - e_k, data, m, v)
+            f3 = neg_log_posterior(h_i - e_j + e_k, data, m, v)
+            f4 = neg_log_posterior(h_i - e_j - e_k, data, m, v)
+            H[j, k] = (f1 - f2 - f3 + f4) / (4 * eps**2)
+    Sigma_i = np.linalg.pinv(H)
+    return H, Sigma_i
+
+# Estimate h_i and diagonal Hessian (Σ_i)
+#todo: make prior an input
+def estimate_h_i_and_Sigma_i(m, v, base_params, sessions, choices, rewards, context, model_config, count=0):
+    # Unbounded optimization for eta
+    alpha_min, alpha_max = 1e-3, 1 - 1e-3
+    eta_min = logit(alpha_min)
+    eta_max = logit(alpha_max)
+    result = minimize(
+        fun=lambda eta: neg_log_posterior(eta, m, v, base_params, sessions, choices, rewards, context, model_config),
+        x0=np.random.randn(),              # random initialization in R
+        bounds=[(eta_min, eta_max)],                       # eta is unbounded
+        method="L-BFGS-B",#'Powell',
+        options=dict(maxiter=5000, ftol=1e-6)
+    )
+    #this finds the MAP estimate of h_i - participant specific estimates of eta (log(alpha))
+    eta = result.x
+    if count < 5:
+        print(f"eta value that is passed to hessian (should be only one value): {eta}")
+    eps = np.sqrt(np.finfo(float).eps)
+    H = hessian_1d(
+        lambda eta: neg_log_posterior(eta, m, v, base_params, sessions, choices, rewards, context, model_config),
+        eta
+    )
+    var_theta = -1.0 / H
+    
+    return eta, var_theta
+
+# EM updates
+def update_group_prior(h, Sigma, min_variance=1e-5):
+    """
+    h:      (N,) or (N,D)     posterior means
+    Sigma:  (N,) or (N,D,D)   posterior variances/covariances
+    """
+    h = np.asarray(h)
+    Sigma = np.asarray(Sigma)
+
+    if h.ndim == 1:
+        # 1D case
+        m = np.mean(h)
+        v = np.mean(h**2 + Sigma) - m**2
+        v = float(np.clip(v, 1e-4, 0.4))
+    else:
+        # D-dimensional case (your original)
+        m = np.mean(h, axis=0)
+        v = np.mean(h**2 + np.diagonal(Sigma, axis1=1, axis2=2), axis=0) - m**2
+        v = np.clip(v, [1e-4, 0.4], None)
+
+    return m, v
+
+def update_group_prior1D(h, Sigma, min_variance=1e-5):
+    """
+    1D case only: h and Sigma are (N,) arrays of posterior means and variances in eta-space.
+    """
+    h = np.asarray(h).reshape(-1)
+    Sigma = np.asarray(Sigma).reshape(-1)
+
+    m = np.mean(h)
+    v = np.mean(h**2 + Sigma) - m**2
+    v = float(np.clip(v, 1e-4, 0.4))  # clamp to sensible range
+
+    return m, v
+
+# EM loop
+def run_empirical_bayes(df, model_config, base_params, n_iter=20):
+    m = 0.5  # Initial group prior means for alpha
+    v = 0.2  # Initial group prior variances for alpha
+    m_history = []
+    v_history = []
+    session_results = []
+    for i in range(n_iter):
+        eta_list = []
+        var_list = []
+        for session, group in df.groupby('session'):
+            count = 0
+            session_indices = group.index
+            sessions = np.full_like(group['c'].values, session)
+            choices = group['c'].values
+            rewards = group['r'].values
+            context = group['context'].values if 'context' in group.columns else None
+            eta_i, var_eta_i = estimate_h_i_and_Sigma_i(m, v, base_params, sessions, choices, rewards, context, model_config, count)
+            count += 1
+            eta_list.append(eta_i) # remember that you're saving the unbounded parameter here
+            var_list.append(var_eta_i)
+            if i == n_iter:
+                session_results.append({
+                    'session': session,
+                    'params': base_params,
+
+                    })
+        eta_vec = np.array(eta_list)
+        var_vec = np.array(var_list)
+        m, v = update_group_prior1D(eta_vec, var_vec)
+        m_history.append(m)
+        v_history.append(v)
+    
+    return m, v, eta_vec, var_vec, np.array(m_history), np.array(v_history)
+
+def infer_params_for_test_EM(df_test, m, v, base_param, model_config):
+    """
+    For each session in df_test:
+    - find eta_j^MAP given fixed prior N(m,v) and base_param
+    - build full param vector (alpha_j inserted into base_param)
+    Returns: dict session -> param_j
+    """
+    params_per_session = {}
+
+    for session, group in df_test.groupby("session"):
+        sessions = np.full_like(group["c"].values, session)
+        choices  = group["c"].values
+        rewards  = group["r"].values
+        context  = group["context"].values if "context" in group.columns else None
+
+        eta_j, var_eta_j = estimate_h_i_and_Sigma_i(
+            m, v,
+            base_param,
+            sessions, choices, rewards, context,
+            model_config
+        )
+        alpha_j = sigmoid(eta_j)
+        param_j = set_alpha_in_param(base_param, alpha_j, model_config)
+
+        params_per_session[session] = param_j
+
+    return params_per_session
+
+
+# def test_parameter_recovery(true_w1=1.8, true_w2=0.5, true_w3=0.5, n_trials=500):
+#     # Simulate data with known parameters
+#     agent = HybridAgent_opt_sim_probit(true_w1, true_w2, true_w3, n_trials)
+#     actions, rewards = [], []
+#     for t in range(n_trials):
+#         prob0 = agent.get_probs(t)
+#         action = np.random.choice([0, 1], p=[prob0, 1-prob0])
+#         reward = np.random.normal(0, 1)  # Simple reward (mean=0)
+#         agent.step(action, reward, t)
+#         actions.append(action)
+#         rewards.append(reward)
+    
+#     # Try to recover parameters
+#     df_test = pd.DataFrame({"action": actions, "reward": rewards, "state": range(n_trials)})
+#     result = minimize(
+#         negative_log_likelihood,
+#         x0=[1.0, 1.0, 1.0],
+#         args=(df_test,),
+#         bounds=[(0.1, 100), (0.1, 100), (0.1, 100)],
+#         method="L-BFGS-B"
+#     )
+#     print(f"True: ({true_beta}, {true_gamma}) | Recovered: {result.x}")
+
+# def estimate_shared_model(df_train_all):
+#     """Fit one model to all participants' data."""
+#     result = minimize(
+#         negative_log_likelihood,
+#         x0=[1.0, 1.0, 1.0],
+#         args=(df_train_all,),
+#         bounds=[(0.1, 100), (0.1, 100), (0.1, 100)],
+#         method="L-BFGS-B",
+#         options={
+#         'maxiter': 1000,  # Increased iterations
+#         'ftol': 1e-6,     # Tighter tolerance
+#         'gtol': 1e-6,
+#     }
+#     )
+#     return result.x
+
+def qlearning_full_with_prior(param, sessions, choices, rewards, context=None, model_config=None):
+    """
+    Q-learning function with priors for computing log-posterior (MAP).
+    Uses `qlearning_full` for value updating and adds prior probability.
+
+    Parameters:
+    - param: Model parameters to estimate.
+    - sessions: Array of session identifiers.
+    - choices: Array of choices made.
+    - rewards: Array of rewards received.
+    - context: Array of context identifiers (optional).
+    - model_config (dict): Configuration dictionary.
+
+    Returns:
+    - Negative log-posterior (MAP).
+    - p1_series: Probability of choosing option 1 for each trial.
+    """
+    # Extract model configuration
+    asymmetric_alpha = model_config.get("asymmetric_alpha", False)
+    forgetting_type = model_config.get("forgetting_type", "none")
+    choice_trace = model_config.get("choice_trace", False)
+    init_Q_free = model_config.get("init_Q_free", False)  
+
+    # Extract parameters and apply priors
+    idx = 0
+    prior_log_prob = 0  # Initialize prior log-probability
+
+    if init_Q_free:
+        idx += 2
+
+    # Alpha parameters
+    if asymmetric_alpha:
+        alphaP = np.clip(param[idx], 1e-3, 1 - 1e-3)
+        prior_log_prob += beta_dist.logpdf(alphaP, a=1.1, b=1.1)
+        idx += 1
+        alphaN = np.clip(param[idx], 1e-3, 1 - 1e-3)
+        prior_log_prob += beta_dist.logpdf(alphaN, a=1.1, b=1.1)
+        idx += 1
+    else:
+        alpha = np.clip(param[idx], 1e-3, 1 - 1e-3)
+        prior_log_prob += beta_dist.logpdf(alpha, a=1.1, b=1.1)
+        idx += 1
+
+    # Forgetting rate
+    if forgetting_type == "free":
+        alphaF = np.clip(param[idx], 1e-3, 1 - 1e-3)
+        prior_log_prob += beta_dist.logpdf(alphaF, a=1.1, b=1.1)
+        idx += 1
+    elif forgetting_type == "fixed":
+        alphaF = alpha if not asymmetric_alpha else (alphaP + alphaN) * 0.5
+    else:
+        alphaF = 0.0
+
+    # Beta parameter (inverse temperature)
+    beta = np.clip(param[idx], 1e-3, 20)
+    prior_log_prob += gamma_dist.logpdf(beta, a=1.2, scale=5.0)
+    idx += 1
+
+    # Choice trace parameters
+    if choice_trace:
+        phi = param[idx]
+        prior_log_prob += norm.logpdf(phi, loc=0, scale=np.sqrt(5))
+        idx += 1
+        tau = np.clip(param[idx], 1e-3, 1 - 1e-3)
+        prior_log_prob += beta_dist.logpdf(tau, a=1.1, b=1.1)
+        idx += 1
+    else:
+        phi = 0.0
+        tau = 0.0
+
+    # Compute log-likelihood using `qlearning_full`
+    neg_ll, p1_series = qlearning_full(param, sessions, choices, rewards, context, model_config)
+
+    # Return negative log-posterior (log-likelihood + log-prior)
+    return neg_ll - prior_log_prob, p1_series
+
+

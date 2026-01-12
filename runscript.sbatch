@@ -20,9 +20,10 @@
 
 cd /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty
 
-#for lmbd in 0.1 0.2 0.3 0.4; do
-#    python run_Q_model.py --lmbd $lmbd
-#done
+for seed_value in 12 50 76 100 142; do
+    python run_Q_model.py --lmbd 0.5 --z 1 --seed $seed_value --latent False
+done
 
-python run_Q_model.py --lmbd 0
- 
+#python run_Q_model.py --lmbd 0.5 --z 3
+
+#python testing_script.py

@@ -1,11 +1,10 @@
 # by KK
 import numpy as np
 import pandas as pd
-from tensorflow.keras.utils import to_categorical
+#from tensorflow.keras.utils import to_categorical
 import random
 
 
-import numpy as np
 import pandas as pd
 from tensorflow.keras.utils import to_categorical
 import matplotlib.pyplot as plt
@@ -153,7 +152,7 @@ def simulate_Qlearning(
     for session in range(n_sessions):
         ll = np.sum(np.log(np.where(c[session] == 0, p[session], 1 - p[session])))
         normalized_ll = np.exp(ll / n_trials)
-        session_ll_list.append({"session": session, "normalized_likelihood": normalized_ll, "model": "True model"})
+        session_ll_list.append({"session": session, "normalized_likelihood": -ll, "model": "True model"}) #change back to normalized ll if need be
 
     session_ll_df = pd.DataFrame(session_ll_list)
 
@@ -294,7 +293,7 @@ def simulate_Qlearning_with_context(
 
 import numpy as np
 import pandas as pd
-from tensorflow.keras.utils import to_categorical
+#from tensorflow.keras.utils import to_categorical
 
 def simulate_Qlearning_with_variable_params(
     rewards, seed=1979, n_trials=200, n_sessions=10, 
@@ -618,7 +617,7 @@ def gen_data_AsymmetricQlearning_variable_alpha(rewards, seed=1979, n_trials=200
 
 
 
-def generate_parameter_lists(true_model, ind_diff_type, Delta_alpha=None, nSession=100):
+def generate_parameter_lists(true_model, ind_diff_type, Delta_alpha=None, nSession=100, seed = 42):
     """
     Generate parameter lists based on model type and individual difference type.
     
@@ -631,7 +630,9 @@ def generate_parameter_lists(true_model, ind_diff_type, Delta_alpha=None, nSessi
     Returns:
     - Dictionary containing parameter lists.
     """
-    
+    if seed is not None:
+        np.random.seed(seed)
+        random.seed(seed)
 
     if "A" in true_model:
         if ind_diff_type in ['continuous_all', 'continuous_alpha_only']:

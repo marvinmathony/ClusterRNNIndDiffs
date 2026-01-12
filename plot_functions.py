@@ -9,6 +9,10 @@ from sklearn.model_selection import cross_val_score, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 import torch
 from sklearn.decomposition import PCA
+from matplotlib.animation import FuncAnimation
+import glob
+from scipy.cluster.hierarchy import linkage, leaves_list
+
 
 def group_models(models):
     """
@@ -994,6 +998,17 @@ def plot_latents(dim_reduction, latent_tensor, avg, n_components, name, df=None,
     elif dim_reduction == "pca":
         pca = PCA(n_components=n_components)
         latents_reduced = pca.fit_transform(latents.cpu().numpy())
+    elif dim_reduction == "one_dim":
+        latents = latent_tensor[:,-1]
+        y = 0.02 * np.random.randn(latents.size(0))
+        colors = param_array
+        plt.figure(figsize=(6, 2))
+        plt.scatter(latents, y, c=colors, cmap="coolwarm")
+        plt.yticks([])
+        plt.xlabel("latent")
+        plt.title("One dimensional latents of IDRNN")
+        plt.savefig("plots/one_dimensional_latent.png", bbox_inches="tight")
+        return 
     if name == 'sloutsky':
         color_map = {"Coin CollectorV6": 0,"Coin CollectorV5": 0, "Coin Collector": 1} #"Coin CollectorV5": 0
     elif name == 'palminteri':
@@ -1284,7 +1299,7 @@ def plot_bic_trajectories(latent1, model1_name, latent2, model2_name, max_compon
     return bics1, bics2, k1, k2
 
 
-def rsa_latents(latents, metric="cosine",title=None, reduction = "avg", plot=True, original_data=False):
+def rsa_latents(latents, metric="cosine",title=None, reduction = "avg", plot=True, original_data=False, cluster_order=False, linkage_method="average", fixed_order=None):
     """
     latents: tensor (N, T, D)
     metric: 'euclidean', 'cosine', etc.
@@ -1312,17 +1327,69 @@ def rsa_latents(latents, metric="cosine",title=None, reduction = "avg", plot=Tru
     dist_vec = pdist(X, metric=metric)
     dist_mat = squareform(dist_vec)  # (N, N)
 
+    if fixed_order is not None:
+        # use provided order (for comparability)
+        order = np.asarray(fixed_order)
+        assert order.shape[0] == dist_mat.shape[0], "fixed_order length must match N"
+        dist_mat_plot = dist_mat[order][:, order]
+    elif cluster_order:
+        # hierarchical clustering on distance vector
+        Z = linkage(dist_vec, method=linkage_method)
+        order = leaves_list(Z)  # permutation of indices
+        dist_mat_plot = dist_mat[order][:, order]
+    else:
+        order = np.arange(dist_mat.shape[0])
+        dist_mat_plot = dist_mat
+
     if plot:
         plt.figure(figsize=(8, 7))
-        im = plt.imshow(dist_mat, cmap="viridis")
+        im = plt.imshow(dist_mat_plot, cmap="viridis")
         plt.colorbar(im, fraction=0.046, pad=0.04)
         plt.title(f"RSA ({header}) – metric: {metric}")
-        plt.xlabel("Participants")
-        plt.ylabel("Participants")
+        plt.xlabel("Participants (clustered)")
+        plt.ylabel("Participants (clustered)")
         plt.tight_layout()
-        #plt.savefig(f"plots/RSA_{title}.png")
+        plt.savefig(f"plots/RSA_{title}.png")
         plt.show()
 
-    return dist_mat
+    return dist_mat, order
+
+
+
+
+def animation(likelihood_wrapper, likelihood_function, checkpoints_files, model, x_test, c_test, x_train, latent, c_train):
+    checkpoint_files = sorted(glob.glob("checkpoints/*.pt"))
+
+    latent_list = []
+    for ckpt in checkpoint_files:
+        print("Loading:", ckpt)
+        model.load_state_dict(torch.load(ckpt))
+        _, latent_tensor, _, normalized_ll_test_IDRNN = likelihood_wrapper(likelihood_function, model, x_test, c_test, x_train, latent=latent, choice_train=c_train, id=True)
+        latents = latent_tensor[:, -1, :].detach().cpu().numpy()
+        latent_list.append(latents)
+    all_latents = np.concatenate(latent_list, axis=0)
+    pca = PCA(n_components=2)
+    pca.fit(all_latents)
+    latent_2d_over_epochs = [pca.transform(lat) for lat in latent_list]
+
+    colors = [0 if i < 100 else 1 for i in range(200)]
+    group_colors = colors
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    def update(frame):
+        ax.clear()
+        xy = latent_2d_over_epochs[frame]
+        ax.scatter(xy[:, 0], xy[:, 1], c=group_colors, cmap="coolwarm")
+        ax.set_title(f"Latent space — Epoch {frame*100}")
+        ax.set_xlabel("PC1")
+        ax.set_ylabel("PC2")
+        ax.grid(True)
+
+    
+
+    anim = FuncAnimation(fig, update, frames=len(latent_2d_over_epochs), interval=400)
+
+    anim.save("plots/latent_evolution_04diff_ID10_common02.gif", writer="pillow")
+    print("Saved latent_evolution.gif")
 
 
