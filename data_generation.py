@@ -35,11 +35,11 @@ rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, interval=50, N=nS
 
 np.save(f"{DATA_DIR}/rewards_train.npy", rewardsTrain)
 
-true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type="discrete_alpha_only", #ind_diff_type='uniform', #,
-                                          Delta_alpha=0.8, nSession=nSession)
+true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='uniform', #ind_diff_type="discrete_alpha_only", #, #,
+                                          Delta_alpha=0.6, nSession=nSession)
 
-true_param_test = sim.generate_parameter_lists(true_model='FQ', ind_diff_type="discrete_alpha_only",# ind_diff_type='uniform',#ind_diff_type='uniform', #,
-                                          Delta_alpha=0.8, nSession=nSession)
+true_param_test = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='uniform',#ind_diff_type="discrete_alpha_only",# ,#ind_diff_type='uniform', #,
+                                          Delta_alpha=0.6, nSession=nSession)
 
 true_param_df = pd.DataFrame(true_param)
 true_param_df.to_csv(f"{DATA_DIR}/true_parameter_values.csv", index=False)

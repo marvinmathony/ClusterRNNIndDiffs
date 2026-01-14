@@ -59,13 +59,13 @@ def load_dataset_results(dataset_id):
 
     # Load best epoch info
     try:
-        with open(os.path.join(runs_dir, "best_epoch_by_rsa.json"), "r") as f:
+        with open(os.path.join(runs_dir, "best_epoch_by_specificity.json"), "r") as f:
             latent_meta = json.load(f)
         with open(os.path.join(runs_vanilla_dir, "best_epoch_by_rsa.json"), "r") as f:
             vanilla_meta = json.load(f)
 
         results['latent_best_epoch'] = latent_meta["best_epoch"]
-        results['latent_best_seed'] = 76  # Using fixed seed as in original
+        results['latent_best_seed'] = latent_meta["best_seed"] #76  # Using fixed seed as in original
         results['vanilla_best_epoch'] = vanilla_meta["best_epoch"]
         results['vanilla_best_seed'] = vanilla_meta["best_seed"]
     except FileNotFoundError as e:
@@ -356,12 +356,13 @@ def plot_per_dataset_breakdown(all_results, output_dir):
     # Plot 1: RSA correlations per dataset
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    latent_corrs = [all_results[d]['latent_rsa_corr'] for d in dataset_ids
-                    if all_results[d] and all_results[d]['latent_rsa_corr'] is not None]
-    vanilla_corrs = [all_results[d]['vanilla_rsa_corr'] for d in dataset_ids
-                     if all_results[d] and all_results[d]['vanilla_rsa_corr'] is not None]
+    # Track which datasets actually have RSA data
+    valid_rsa_datasets = [d for d in dataset_ids
+                          if all_results[d] and all_results[d]['latent_rsa_corr'] is not None]
+    latent_corrs = [all_results[d]['latent_rsa_corr'] for d in valid_rsa_datasets]
+    vanilla_corrs = [all_results[d]['vanilla_rsa_corr'] for d in valid_rsa_datasets]
 
-    x = np.arange(len(latent_corrs))
+    x = np.arange(len(valid_rsa_datasets))
     width = 0.35
 
     ax.bar(x - width/2, latent_corrs, width, label='IDRNN', color='tab:blue', alpha=0.8)
@@ -371,7 +372,7 @@ def plot_per_dataset_breakdown(all_results, output_dir):
     ax.set_ylabel('RSA Correlation', fontsize=12)
     ax.set_title('RSA Correlation per Dataset', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
-    ax.set_xticklabels([f'D{d}' for d in dataset_ids])
+    ax.set_xticklabels([f'D{d}' for d in valid_rsa_datasets])
     ax.legend()
     ax.set_ylim(bottom=0)
 
@@ -387,30 +388,35 @@ def plot_per_dataset_breakdown(all_results, output_dir):
     rnn_id_lls = []
     rnn_common_lls = []
     rnn_vanilla_lls = []
+    valid_ll_datasets = []
 
     for dataset_id in dataset_ids:
         if all_results[dataset_id] is None:
             continue
 
-        if all_results[dataset_id]['rnn_ID_df'] is not None:
-            ll = all_results[dataset_id]['rnn_ID_df'][
+        # Only include datasets that have all three RNN results
+        if (all_results[dataset_id]['rnn_ID_df'] is not None and
+            all_results[dataset_id]['rnn_common_process_df'] is not None and
+            all_results[dataset_id]['rnn_vanilla_df'] is not None):
+
+            ll_id = all_results[dataset_id]['rnn_ID_df'][
                 all_results[dataset_id]['rnn_ID_df']["model"] == "IDRNN"
             ]["normalized_likelihood"].mean()
-            rnn_id_lls.append(ll)
+            rnn_id_lls.append(ll_id)
 
-        if all_results[dataset_id]['rnn_common_process_df'] is not None:
-            ll = all_results[dataset_id]['rnn_common_process_df'][
+            ll_common = all_results[dataset_id]['rnn_common_process_df'][
                 all_results[dataset_id]['rnn_common_process_df']["model"] == "common_process_RNN"
             ]["normalized_likelihood"].mean()
-            rnn_common_lls.append(ll)
+            rnn_common_lls.append(ll_common)
 
-        if all_results[dataset_id]['rnn_vanilla_df'] is not None:
-            ll = all_results[dataset_id]['rnn_vanilla_df'][
+            ll_vanilla = all_results[dataset_id]['rnn_vanilla_df'][
                 all_results[dataset_id]['rnn_vanilla_df']["model"] == "vanillaRNN"
             ]["normalized_likelihood"].mean()
-            rnn_vanilla_lls.append(ll)
+            rnn_vanilla_lls.append(ll_vanilla)
 
-    x = np.arange(len(rnn_id_lls))
+            valid_ll_datasets.append(dataset_id)
+
+    x = np.arange(len(valid_ll_datasets))
     width = 0.25
 
     ax.bar(x - width, rnn_common_lls, width, label='RNN Common Process', color='tab:green', alpha=0.8)
@@ -421,7 +427,7 @@ def plot_per_dataset_breakdown(all_results, output_dir):
     ax.set_ylabel('Mean Log Likelihood', fontsize=12)
     ax.set_title('RNN Model Performance per Dataset', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
-    ax.set_xticklabels([f'D{d}' for d in dataset_ids])
+    ax.set_xticklabels([f'D{d}' for d in valid_ll_datasets])
     ax.legend()
 
     plt.tight_layout()

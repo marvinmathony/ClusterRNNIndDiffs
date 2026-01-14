@@ -6,7 +6,7 @@ import json
 import argparse
 
 parser = argparse.ArgumentParser(description="Select best epoch by RSA")
-parser.add_argument('--latent', type=bool, default=True, help="latent or vanilla modeling")
+parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True, help="latent or vanilla modeling")
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
 args = parser.parse_args()
 
@@ -71,54 +71,54 @@ for epoch in common_epochs:
 
 ##### sort first based on RSA, then on loss #####
 #Sort epochs by RSA (descending)
-# top5_epochs_dict = sorted(
-#     reliability_per_epoch.items(),
-#     key=lambda x: x[1],
-#     reverse=True
-# )[:5]
+top5_epochs_dict = sorted(
+    reliability_per_epoch.items(),
+    key=lambda x: x[1],
+    reverse=True
+)[:5]
 
-# top5_epochs_dict = sorted(
-#     ((ep, val) for ep, val in reliability_per_epoch.items() if ep > 3000),
-#     key=lambda x: x[1],
-#     reverse=True
-# )[:5]
+top5_epochs_dict = sorted(
+    ((ep, val) for ep, val in reliability_per_epoch.items() if ep > 3000),
+    key=lambda x: x[1],
+    reverse=True
+)[:5]
 
-# top5_epochs_dict = dict(top5_epochs_dict)
-# top5_epochs_only = list(top5_epochs_dict.keys())
-# top5_rsa_values  = list(top5_epochs_dict.values())
+top5_epochs_dict = dict(top5_epochs_dict)
+top5_epochs_only = list(top5_epochs_dict.keys())
+top5_rsa_values  = list(top5_epochs_dict.values())
 
-# print(f"top 5 epochs sorted by rsa in descending order: {top5_rsa_values}")
+print(f"top 5 epochs sorted by rsa in descending order: {top5_rsa_values}")
 
-# mean_loss_per_epoch_top5 = {}
-# # select epoch with lowest loss of those
-# for epoch in top5_epochs_only:
-#     losses_top5_per_epoch = [load_loss_vector(seed, epoch) for seed in SEEDS] # losses across seed for given epoch
-#     mean_loss_top5 = np.mean(losses_top5_per_epoch)
-#     mean_loss_per_epoch_top5[epoch] = mean_loss_top5
-# # minumum of the 5
-# best_epoch = min(mean_loss_per_epoch_top5, key=mean_loss_per_epoch_top5.get)
-# best_reliability = top5_epochs_dict[best_epoch]
+mean_loss_per_epoch_top5 = {}
+# select epoch with lowest loss of those
+for epoch in top5_epochs_only:
+    losses_top5_per_epoch = [load_loss_vector(seed, epoch) for seed in SEEDS] # losses across seed for given epoch
+    mean_loss_top5 = np.mean(losses_top5_per_epoch)
+    mean_loss_per_epoch_top5[epoch] = mean_loss_top5
+# minumum of the 5
+best_epoch = min(mean_loss_per_epoch_top5, key=mean_loss_per_epoch_top5.get)
+best_reliability = top5_epochs_dict[best_epoch]
 
 
 
 ##### sort first based on loss, then RSA #####
 # choose top 5 epochs based on train loss
-top_5_best_loss_epochs = []
-mean_loss_per_epoch_copy = mean_loss_per_epoch.copy()
-for i in range(5):
-    best_loss_epoch = min(mean_loss_per_epoch_copy, key=mean_loss_per_epoch_copy.get)
-    top_5_best_loss_epochs.append(best_loss_epoch)
-    mean_loss_per_epoch_copy[best_loss_epoch] = np.inf
-    #top_5_best_loss_epochs[i.toString()] = mean_loss_per_epoch_copy[best_loss_epoch]
+# top_5_best_loss_epochs = []
+# mean_loss_per_epoch_copy = mean_loss_per_epoch.copy()
+# for i in range(5):
+#     best_loss_epoch = min(mean_loss_per_epoch_copy, key=mean_loss_per_epoch_copy.get)
+#     top_5_best_loss_epochs.append(best_loss_epoch)
+#     mean_loss_per_epoch_copy[best_loss_epoch] = np.inf
+#     #top_5_best_loss_epochs[i.toString()] = mean_loss_per_epoch_copy[best_loss_epoch]
 
-# 2. Choose the epoch with max reliability
-reliability_after_500 = {e: r for e, r in reliability_per_epoch.items() if e > 1}
-threshold = 1
-reliability_top5 = {e: reliability_per_epoch[e]
-                    for e in top_5_best_loss_epochs
-                    if e in reliability_per_epoch and e > threshold}
-best_epoch = max(reliability_top5, key=reliability_top5.get)
-best_reliability = reliability_top5[best_epoch]
+# # 2. Choose the epoch with max reliability
+# reliability_after_500 = {e: r for e, r in reliability_per_epoch.items() if e > 1}
+# threshold = 1
+# reliability_top5 = {e: reliability_per_epoch[e]
+#                     for e in top_5_best_loss_epochs
+#                     if e in reliability_per_epoch and e > threshold}
+# best_epoch = max(reliability_top5, key=reliability_top5.get)
+# best_reliability = reliability_top5[best_epoch]
 
 
 # now I want the exact seed that we should use

@@ -5,6 +5,27 @@ checkpoints/
 runs/
 runs_vanilla/
 wandb/
+runs_dataset0/
+runs_dataset1/
+runs_dataset2/
+runs_dataset3/
+runs_dataset4/
+results_summary/
+plots_dataset0/
+plots_dataset1/
+plots_dataset2/
+plots_dataset3/
+plots_dataset4/
+runs_vanilla_dataset0/
+runs_vanilla_dataset1/
+runs_vanilla_dataset2/
+runs_vanilla_dataset3/
+runs_vanilla_dataset4/
+data_dataset0/
+data_dataset1/
+data_dataset2/
+data_dataset3/
+data_dataset4/
 
 # Python cache files
 __pycache__/

@@ -120,9 +120,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="hello")
     parser.add_argument('--lmbd', type=float, help="how to weigh the two losses", default=1.)
-    parser.add_argument('--z', type=int, help="dimension of latent space", default=1.)
-    parser.add_argument('--seed', type=int, help="random seed", default=42.)
-    parser.add_argument('--latent', type=bool, help="latent or vanilla modeling", default=False)
+    parser.add_argument('--z', type=int, help="dimension of latent space", default=1)
+    parser.add_argument('--seed', type=int, help="random seed", default=42)
+    parser.add_argument('--latent', type=lambda x: x.lower() == 'true', help="latent or vanilla modeling", default=False)
     parser.add_argument('--dataset_id', type=int, help="dataset ID for multi-dataset experiments", default=0)
     args = parser.parse_args()
 
@@ -216,6 +216,12 @@ if __name__ == '__main__':
         in_dim_test = xin_test.shape[2]
 
 
+    # Ensure any previous wandb run is properly closed
+    try:
+        wandb.finish()
+    except Exception:
+        pass
+
     wandb.init(project=wandb_name, config=args)
     # --- Create a config dict ---
     config_dict = vars(args).copy()  # start with CLI arguments
@@ -229,6 +235,18 @@ if __name__ == '__main__':
         "n_fit_iter": n_fit_iter,
         "in_dim": in_dim
     })
+
+    # Add model architecture config for easy loading
+    config_dict["model_config"] = {
+        "in_dim": in_dim,
+        "z_dim": z_dim,
+        "hidden": hidden,
+        "A": A,
+        "block_structure": False,
+        "n_participants_train": B,
+        "n_participants_test": B_test,
+        "model_type": "IDRNN" if latent else "Vanilla"
+    }
 
     config_path = os.path.join(run_dir, "config.json")
     with open(config_path, "w") as f:

@@ -12,7 +12,7 @@ import argparse
 import torch
 
 parser = argparse.ArgumentParser(description="Select best epoch by composite score")
-parser.add_argument('--latent', type=bool, default=True, help="latent or vanilla modeling")
+parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True, help="latent or vanilla modeling")
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
 args = parser.parse_args()
 

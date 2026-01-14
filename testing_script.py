@@ -12,9 +12,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Parse arguments
 parser = argparse.ArgumentParser(description="Test trained models")
-parser.add_argument('--latent', type=bool, default=True, help="latent or vanilla modeling")
+parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True, help="latent or vanilla modeling")
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
-parser.add_argument('--model_fitting', type=bool, default=False, help="whether to fit cognitive models")
+parser.add_argument('--model_fitting', type=lambda x: x.lower() == 'true', default=False, help="whether to fit cognitive models")
 args = parser.parse_args()
 
 ############################
@@ -50,11 +50,11 @@ c_train = torch.from_numpy(c_train).float().to(device)
 BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 
 # Load best epoch
-with open(os.path.join(BASE_DIR, "best_epoch_by_rsa.json"), "r") as f:
+with open(os.path.join(BASE_DIR, "best_epoch_by_specificity.json"), "r") as f:
     meta = json.load(f)
 
 best_epoch = meta["best_epoch"]
-SEED_FOR_ANALYSIS = 76 if BASE_DIR == "runs" else meta["best_seed"]
+SEED_FOR_ANALYSIS = meta["best_seed"]
 print(f"Using epoch {best_epoch:04d} from seed {SEED_FOR_ANALYSIS} for analysis.")
 
 #### LOAD MODEL PARAMETERS ####

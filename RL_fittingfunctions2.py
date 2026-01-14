@@ -1183,8 +1183,8 @@ def estimate_h_i_and_Sigma_i(m, v, base_params, sessions, choices, rewards, cont
     )
     #this finds the MAP estimate of h_i - participant specific estimates of eta (log(alpha))
     eta = result.x
-    if count < 5:
-        print(f"eta value that is passed to hessian (should be only one value): {eta}")
+    #if count < 5:
+        #print(f"eta value that is passed to hessian (should be only one value): {eta}")
     eps = np.sqrt(np.finfo(float).eps)
     H = hessian_1d(
         lambda eta: neg_log_posterior(eta, m, v, base_params, sessions, choices, rewards, context, model_config),
