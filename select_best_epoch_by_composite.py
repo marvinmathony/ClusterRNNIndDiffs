@@ -223,3 +223,21 @@ with open(out_path_standard, "w") as f:
     }, f, indent=2)
 
 print(f"Saved to standard location: {out_path_standard}")
+
+# For IDRNN models, also save to best_epoch_by_specificity.json for testing_script.py compatibility
+if latent:
+    out_path_specificity = os.path.join(BASE_DIR, "best_epoch_by_specificity.json")
+    with open(out_path_specificity, "w") as f:
+        json.dump({
+            "best_epoch": best_epoch,
+            "best_seed": best_seed,
+            "best_specificity": float(best_composite_score),
+            "composite_score": float(best_composite_score),
+            "metrics": {
+                "rsa_reliability": float(best_metrics['rsa_reliability']),
+                "mean_loss": float(best_metrics['mean_loss']),
+                "stability": float(best_metrics['stability'])
+            },
+            "seeds": SEEDS
+        }, f, indent=2)
+    print(f"Saved IDRNN selection to: {out_path_specificity}")

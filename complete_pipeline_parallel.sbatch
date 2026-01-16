@@ -55,9 +55,9 @@ for seed in "${SEEDS[@]}"; do
         --dataset_id $DATASET_ID
 done
 
-# Step 2: Select best epoch for vanilla models
+# Step 2: Select best epoch for vanilla models using composite score
 echo "Selecting best epoch for vanilla models..."
-python select_best_epoch_by_rsa.py --latent False --dataset_id $DATASET_ID
+python select_best_epoch_by_composite.py --latent False --dataset_id $DATASET_ID
 
 # Step 3: Test models
 echo "Testing models for dataset $DATASET_ID..."

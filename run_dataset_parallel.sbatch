@@ -48,7 +48,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 # Configuration
 LMBD=0.5
-Z_DIM=1
+Z_DIM=3
 SEEDS=(12 50 76 100 142)
 
 # Step 1: Generate data
@@ -80,9 +80,10 @@ for seed in "${SEEDS[@]}"; do
 done
 
 # Step 4: Select best epochs
+# Use composite score (RSA reliability + loss + stability) for both model types
 echo "Selecting best epochs for dataset $DATASET_ID..."
 python select_best_epoch_by_specificity.py --latent True --dataset_id $DATASET_ID
-python select_best_epoch_by_specificity.py --latent False --dataset_id $DATASET_ID
+python select_best_epoch_by_rsa.py --latent False --dataset_id $DATASET_ID
 
 # Step 5: Test models
 echo "Testing models for dataset $DATASET_ID..."

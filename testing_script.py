@@ -50,8 +50,14 @@ c_train = torch.from_numpy(c_train).float().to(device)
 BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 
 # Load best epoch
-with open(os.path.join(BASE_DIR, "best_epoch_by_specificity.json"), "r") as f:
-    meta = json.load(f)
+if latent:
+
+    with open(os.path.join(BASE_DIR, "best_epoch_by_specificity.json"), "r") as f:
+        meta = json.load(f)
+else:
+    with open(os.path.join(BASE_DIR, "best_epoch_by_rsa.json"), "r") as f:
+        meta = json.load(f)
+
 
 best_epoch = meta["best_epoch"]
 SEED_FOR_ANALYSIS = meta["best_seed"]
