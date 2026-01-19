@@ -444,7 +444,7 @@ def run_causal_inference_example(dataset_id=0, seed=12, participant_idx=0):
     best_epoch_path = f"runs_dataset{dataset_id}/best_epoch_by_specificity.json"
     if not os.path.exists(best_epoch_path):
         print(f"Best epoch file not found: {best_epoch_path}")
-        return None, None, None, None, None
+        return None, None, None, None
 
     with open(best_epoch_path, 'r') as f:
         best_info = json.load(f)
@@ -459,7 +459,7 @@ def run_causal_inference_example(dataset_id=0, seed=12, participant_idx=0):
 
     if not os.path.exists(config_path):
         print(f"Config not found: {config_path}")
-        return None, None, None, None, None
+        return None, None, None, None
 
     with open(config_path, 'r') as f:
         config = json.load(f)
@@ -497,10 +497,10 @@ def run_causal_inference_example(dataset_id=0, seed=12, participant_idx=0):
     model = LatentRNN_secondstep(encoder=encoder, hid=hidden, z_dim=z_dim, in_dim=in_dim, A=A, decoder=decoder)
 
     # Load best checkpoint by specificity
-    ckpt_path = os.path.join(run_dir, "checkpoints", f"epoch_{best_epoch}.pt")
+    ckpt_path = os.path.join(run_dir, "checkpoints", f"epoch{best_epoch}.pt")
     if not os.path.exists(ckpt_path):
         print(f"Best checkpoint not found: {ckpt_path}")
-        return None, None, None, None, None
+        return None, None, None, None
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     model.to(device)
     model.eval()
@@ -700,22 +700,17 @@ def figure3_training_dynamics(output_dir):
     # Try to run causal inference on a real participant
     try:
         mu_traj, sigma_traj, true_alpha, T = run_causal_inference_example(
-            dataset_id=0, seed=12, participant_idx=5  # Pick a participant
+            dataset_id=0, seed=12, participant_idx=100  # Pick a participant
         )
 
         if mu_traj is not None:
             trials = np.arange(1, T + 1)
 
-            # Plot confidence interval
-            ax_causal.fill_between(trials, mu_traj - 2*sigma_traj, mu_traj + 2*sigma_traj,
-                                   color=COLORS['latent'], alpha=0.3, label='95% CI')
+            # Plot model's uncertainty (σ) as shaded region
+            ax_causal.fill_between(trials, mu_traj - sigma_traj, mu_traj + sigma_traj,
+                                   color=COLORS['latent'], alpha=0.3, label='σ(t)')
             # Plot mean trajectory
             ax_causal.plot(trials, mu_traj, color=COLORS['encoder'], linewidth=2, label='μ(t)')
-
-            # Add horizontal line for context (normalized true alpha)
-            # Note: true_alpha is in parameter space, z is in latent space - they're related but not directly comparable
-            ax_causal.axhline(y=np.mean(mu_traj[-20:]), color=COLORS['loss_ce'], linestyle='--',
-                             linewidth=1.5, label='Converged estimate')
 
             ax_causal.set_xlabel('Trial t')
             ax_causal.set_ylabel('Inferred z')
@@ -737,11 +732,9 @@ def figure3_training_dynamics(output_dir):
         mu_t = true_z + 0.5 * np.exp(-trials/20) + 0.1 * np.random.randn(T) * np.exp(-trials/30)
         sigma_t = 0.3 * np.exp(-trials/25) + 0.05
 
-        ax_causal.fill_between(trials, mu_t - 2*sigma_t, mu_t + 2*sigma_t,
-                               color=COLORS['latent'], alpha=0.3, label='95% CI')
+        ax_causal.fill_between(trials, mu_t - sigma_t, mu_t + sigma_t,
+                               color=COLORS['latent'], alpha=0.3, label='σ(t)')
         ax_causal.plot(trials, mu_t, color=COLORS['encoder'], linewidth=2, label='μ(t)')
-        ax_causal.axhline(y=true_z, color=COLORS['loss_ce'], linestyle='--',
-                          linewidth=1.5, label=f'True z = {true_z}')
 
         ax_causal.set_xlabel('Trial t')
         ax_causal.set_ylabel('Inferred z')

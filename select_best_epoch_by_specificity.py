@@ -95,13 +95,19 @@ def compute_reconstruction_specificity(
 
 
 def main():
+    # Epoch window configuration (must match analyze_synthetic_multi_dataset.py)
+    DEFAULT_MAX_EPOCH = 3000  # Epoch cutoff to prevent overtraining
+    DEFAULT_MIN_EPOCH = 1000  # Minimum epoch to consider
+
     parser = argparse.ArgumentParser(description="Select best epoch by reconstruction specificity")
     parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True,
                         help="latent or vanilla modeling")
     parser.add_argument('--dataset_id', type=int, default=0,
                         help="dataset ID for multi-dataset experiments")
-    parser.add_argument('--min_epoch', type=int, default=3000,
+    parser.add_argument('--min_epoch', type=int, default=DEFAULT_MIN_EPOCH,
                         help="minimum epoch to consider")
+    parser.add_argument('--max_epoch', type=int, default=DEFAULT_MAX_EPOCH,
+                        help="maximum epoch to consider")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -110,6 +116,7 @@ def main():
     is_latent = args.latent
     DATASET_ID = args.dataset_id
     MIN_EPOCH = args.min_epoch
+    MAX_EPOCH = args.max_epoch
 
     BASE_DIR = f"runs_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_dataset{DATASET_ID}"
     DATA_DIR = f"data_dataset{DATASET_ID}"
@@ -120,6 +127,7 @@ def main():
     print(f"EPOCH SELECTION BY RECONSTRUCTION SPECIFICITY")
     print(f"Model: {model_type}")
     print(f"Dataset: {DATASET_ID}")
+    print(f"Epoch window: [{MIN_EPOCH}, {MAX_EPOCH}]")
     print(f"{'='*80}\n")
 
     # Load data
@@ -140,9 +148,9 @@ def main():
 
     epochs_per_seed = {seed: set(list_epochs_for_seed(seed)) for seed in SEEDS}
     common_epochs = sorted(set.intersection(*epochs_per_seed.values()))
-    common_epochs = [e for e in common_epochs if e >= MIN_EPOCH]
+    common_epochs = [e for e in common_epochs if e >= MIN_EPOCH and (MAX_EPOCH is None or e <= MAX_EPOCH)]
 
-    print(f"Found {len(common_epochs)} common epochs >= {MIN_EPOCH}")
+    print(f"Found {len(common_epochs)} common epochs in window [{MIN_EPOCH}, {MAX_EPOCH}]")
 
     if not common_epochs:
         print("No common epochs found. Exiting.")
@@ -267,6 +275,7 @@ def main():
             for s in seed_scores
         },
         "min_epoch": MIN_EPOCH,
+        "max_epoch": MAX_EPOCH,
         "seeds": SEEDS
     }
 

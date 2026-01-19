@@ -5,16 +5,26 @@ from itertools import combinations
 import json
 import argparse
 
+# Epoch window configuration (must match analyze_synthetic_multi_dataset.py)
+MAX_EPOCH = 3000  # Epoch cutoff to prevent overtraining; set to None for no cutoff
+MIN_EPOCH = 1000  # Minimum epoch to consider (allow some initial training)
+
 parser = argparse.ArgumentParser(description="Select best epoch by RSA")
 parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True, help="latent or vanilla modeling")
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
+parser.add_argument('--min_epoch', type=int, default=MIN_EPOCH, help="minimum epoch to consider")
+parser.add_argument('--max_epoch', type=int, default=MAX_EPOCH, help="maximum epoch to consider")
 args = parser.parse_args()
 
 latent = args.latent
 DATASET_ID = args.dataset_id
+MIN_EPOCH = args.min_epoch
+MAX_EPOCH = args.max_epoch
 
 BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 SEEDS = [12,50,76,100,142]  # or read from args
+
+print(f"Selecting best epoch in window [{MIN_EPOCH}, {MAX_EPOCH}]")
 
 def list_epochs_for_seed(seed):
     rsa_dir = os.path.join(BASE_DIR, f"seed_{seed}", "rsa")
@@ -22,12 +32,16 @@ def list_epochs_for_seed(seed):
     epochs = [int(f.split("_")[1].split(".")[0]) for f in files]
     return sorted(epochs)
 
-# 1. Find common epochs across all seeds
+# 1. Find common epochs across all seeds within the specified window
 epochs_per_seed = {seed: set(list_epochs_for_seed(seed)) for seed in SEEDS}
 common_epochs = sorted(set.intersection(*epochs_per_seed.values()))
 
+# Filter to epoch window
+common_epochs = [e for e in common_epochs if e >= MIN_EPOCH and (MAX_EPOCH is None or e <= MAX_EPOCH)]
+print(f"Found {len(common_epochs)} common epochs in window [{MIN_EPOCH}, {MAX_EPOCH}]")
+
 if not common_epochs:
-    raise RuntimeError("No common epochs across seeds – check your runs.")
+    raise RuntimeError(f"No common epochs across seeds in window [{MIN_EPOCH}, {MAX_EPOCH}] – check your runs.")
 
 def load_rsa_vector(seed, epoch):
     rsa_path = os.path.join(BASE_DIR, f"seed_{seed}", "rsa", f"epoch_{epoch:04d}.npy")
@@ -70,15 +84,9 @@ for epoch in common_epochs:
 
 
 ##### sort first based on RSA, then on loss #####
-#Sort epochs by RSA (descending)
+# Sort epochs by RSA (descending) - epochs already filtered to window
 top5_epochs_dict = sorted(
     reliability_per_epoch.items(),
-    key=lambda x: x[1],
-    reverse=True
-)[:5]
-
-top5_epochs_dict = sorted(
-    ((ep, val) for ep, val in reliability_per_epoch.items() if ep > 3000),
     key=lambda x: x[1],
     reverse=True
 )[:5]

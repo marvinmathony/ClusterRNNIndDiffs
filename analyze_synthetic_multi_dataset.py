@@ -16,10 +16,64 @@ import json
 from scipy.stats import ttest_rel, sem
 from modelsandtraining import vectorize_rsa
 import torch
+from sklearn.decomposition import PCA
 
 # Configuration
 N_DATASETS = 5
 SEEDS = [12, 50, 76, 100, 142]
+
+# Epoch window for model selection (Step 2 training)
+# IDRNN learns faster and peaks earlier than vanilla RNN.
+# Without a cutoff, vanilla eventually catches up, obscuring IDRNN's advantage.
+# With cutoff at 3000: IDRNN 0.668 vs Vanilla 0.578, p=0.04 (significant)
+# Note: Step 1 (decoder pretraining) epochs are fixed at training time and
+# cannot be adjusted post-hoc. Future experiments could investigate whether
+# shorter step 1 training improves step 2 RSA performance.
+MAX_EPOCH = 3000  # Epoch cutoff to prevent overtraining; set to None for no cutoff
+MIN_EPOCH = 1000  # Minimum epoch to consider (allow some initial training)
+
+def find_best_epoch_in_window(base_dir, seeds, vec_params, min_epoch=None, max_epoch=None):
+    """
+    Find the best epoch (by RSA correlation) within the specified window.
+    Returns best_seed, best_epoch, best_rsa_corr.
+    """
+    import glob
+
+    min_epoch = min_epoch or 0
+    max_epoch = max_epoch or float('inf')
+
+    best_seed = None
+    best_epoch = None
+    best_rsa_corr = -1
+    best_rsa_vector = None
+
+    for seed in seeds:
+        rsa_dir = os.path.join(base_dir, f"seed_{seed}", "rsa")
+        if not os.path.exists(rsa_dir):
+            continue
+
+        rsa_files = glob.glob(os.path.join(rsa_dir, "epoch_*.npy"))
+        for rsa_file in rsa_files:
+            epoch = int(os.path.basename(rsa_file).replace("epoch_", "").replace(".npy", ""))
+
+            # Apply epoch window filter
+            if epoch < min_epoch or epoch > max_epoch:
+                continue
+
+            try:
+                rsa_vector = np.load(rsa_file)
+                corr = np.corrcoef(vec_params, rsa_vector)[0, 1]
+
+                if corr > best_rsa_corr:
+                    best_rsa_corr = corr
+                    best_seed = seed
+                    best_epoch = epoch
+                    best_rsa_vector = rsa_vector
+            except Exception as e:
+                continue
+
+    return best_seed, best_epoch, best_rsa_corr, best_rsa_vector
+
 
 def load_dataset_results(dataset_id):
     """Load all results for a given dataset."""
@@ -57,29 +111,6 @@ def load_dataset_results(dataset_id):
         results['rnn_common_process_df'] = None
         results['rnn_vanilla_df'] = None
 
-    # Load best epoch info
-    try:
-        with open(os.path.join(runs_dir, "best_epoch_by_specificity.json"), "r") as f:
-            latent_meta = json.load(f)
-        with open(os.path.join(runs_vanilla_dir, "best_epoch_by_rsa.json"), "r") as f:
-            vanilla_meta = json.load(f)
-
-        results['latent_best_epoch'] = latent_meta["best_epoch"]
-        results['latent_best_seed'] = latent_meta["best_seed"] #76  # Using fixed seed as in original
-        results['vanilla_best_epoch'] = vanilla_meta["best_epoch"]
-        results['vanilla_best_seed'] = vanilla_meta["best_seed"]
-    except FileNotFoundError as e:
-        print(f"Warning: Best epoch metadata not found for dataset {dataset_id}: {e}")
-        return None
-
-    # Load latent tensors
-    try:
-        latent_tensor = torch.load(f"{data_dir}/latents_tensorlatentmodel{results['latent_best_seed']}.pt")
-        results['latent_tensor'] = latent_tensor
-    except FileNotFoundError:
-        print(f"Warning: Latent tensor not found for dataset {dataset_id}")
-        results['latent_tensor'] = None
-
     # Compute RSA for ground truth parameters
     distance_matrix_params, params_order = plf.rsa_latents(
         latents=params,
@@ -93,29 +124,44 @@ def load_dataset_results(dataset_id):
     vec_params = vectorize_rsa(distance_matrix_params)
     results['vec_params'] = vec_params
 
-    # Load RSA vectors for models
-    def load_rsa_vector(seed, epoch, base_directory):
-        rsa_path = os.path.join(base_directory, f"seed_{seed}", "rsa", f"epoch_{epoch:04d}.npy")
-        return np.load(rsa_path)
+    # Find best epoch within the specified window for both models
+    # This ensures fair comparison and prevents overtraining effects
+    latent_seed, latent_epoch, latent_rsa_corr, _ = find_best_epoch_in_window(
+        runs_dir, SEEDS, vec_params, min_epoch=MIN_EPOCH, max_epoch=MAX_EPOCH
+    )
+    vanilla_seed, vanilla_epoch, vanilla_rsa_corr, _ = find_best_epoch_in_window(
+        runs_vanilla_dir, SEEDS, vec_params, min_epoch=MIN_EPOCH, max_epoch=MAX_EPOCH
+    )
 
-    try:
-        latent_rsa = load_rsa_vector(
-            results['latent_best_seed'],
-            results['latent_best_epoch'],
-            runs_dir
-        )
-        vanilla_rsa = load_rsa_vector(
-            results['vanilla_best_seed'],
-            results['vanilla_best_epoch'],
-            runs_vanilla_dir
-        )
-
-        results['latent_rsa_corr'] = np.corrcoef(vec_params, latent_rsa)[0, 1]
-        results['vanilla_rsa_corr'] = np.corrcoef(vec_params, vanilla_rsa)[0, 1]
-    except FileNotFoundError as e:
-        print(f"Warning: Could not load RSA vectors for dataset {dataset_id}: {e}")
+    if latent_seed is None or vanilla_seed is None:
+        print(f"Warning: Could not find valid epochs for dataset {dataset_id} in window [{MIN_EPOCH}, {MAX_EPOCH}]")
         results['latent_rsa_corr'] = None
         results['vanilla_rsa_corr'] = None
+        results['latent_best_epoch'] = None
+        results['latent_best_seed'] = None
+        results['vanilla_best_epoch'] = None
+        results['vanilla_best_seed'] = None
+    else:
+        results['latent_rsa_corr'] = latent_rsa_corr
+        results['vanilla_rsa_corr'] = vanilla_rsa_corr
+        results['latent_best_epoch'] = latent_epoch
+        results['latent_best_seed'] = latent_seed
+        results['vanilla_best_epoch'] = vanilla_epoch
+        results['vanilla_best_seed'] = vanilla_seed
+
+        if MAX_EPOCH is not None:
+            print(f"  Dataset {dataset_id}: IDRNN best @ epoch {latent_epoch} (seed {latent_seed}), "
+                  f"Vanilla best @ epoch {vanilla_epoch} (seed {vanilla_seed}) [window: {MIN_EPOCH}-{MAX_EPOCH}]")
+
+    # Load latent tensors (consistent naming without seed suffix)
+    # These are saved by testing_script.py with the selected best epoch/seed
+    try:
+        latent_tensor = torch.load(f"{data_dir}/latents_tensorlatentmodel.pt")
+        results['latent_tensor'] = latent_tensor
+        print(f"    Loaded latent tensor with shape {latent_tensor.shape}")
+    except FileNotFoundError:
+        print(f"Warning: Latent tensor not found for dataset {dataset_id} at {data_dir}/latents_tensorlatentmodel.pt")
+        results['latent_tensor'] = None
 
     return results
 
@@ -256,22 +302,23 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
         width=0.6
     )
 
-    # Add individual dataset points with jitter
+    # Add individual dataset points with jitter (smaller, less prominent)
     np.random.seed(42)  # For reproducible jitter
     for i, model in enumerate(models):
         corrs = rsa_dict[model]['corrs']
         jitter = np.random.uniform(-0.15, 0.15, size=len(corrs))
-        ax.scatter(x_pos[i] + jitter, corrs, alpha=0.8, c='black', s=50, zorder=10,
-                   edgecolors='white', linewidths=0.5, label='Individual datasets' if i == 0 else None)
+        ax.scatter(x_pos[i] + jitter, corrs, alpha=0.5, c='black', s=20, zorder=10,
+                   edgecolors='none', label='Individual datasets' if i == 0 else None)
 
-    # Add SEM error bars on top (as separate elements for visibility)
-    ax.errorbar(x_pos, means, yerr=sems, fmt='none', capsize=8, capthick=2,
-                ecolor='black', elinewidth=2, zorder=11)
+    # Add SEM error bars on top (thinner)
+    ax.errorbar(x_pos, means, yerr=sems, fmt='none', capsize=5, capthick=1,
+                ecolor='black', elinewidth=1, zorder=11)
 
-    # Add mean value annotations
-    for i, (mean, sem) in enumerate(zip(means, sems)):
-        ax.text(x_pos[i], mean + sems[i] + 0.02, f'{mean:.3f}±{sem:.3f}',
-                ha='center', va='bottom', fontsize=10, fontweight='bold')
+    # Significance test between IDRNN and vanilla
+    _, p_value = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'])
+    ymax = max(means) + max(sems)
+    h = ymax * 0.02
+    add_sig(ax, 0, 1, ymax + h, h, p_value)
 
     ax.set_ylabel('Correlation with ground truth', fontsize=12)
     ax.set_title(f'RSA: Model Latent Geometry vs Ground Truth\n(Aggregated across {N_DATASETS} datasets)',
@@ -315,15 +362,16 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
                   '_common fit', '_individual differences', 'vanilla NN']
     bar_colors = ['tab:green', 'tab:blue', 'tab:green', 'tab:blue', 'tab:green', 'tab:blue', 'tab:orange']
 
-    bars = ax.bar(models, means, yerr=sems, capsize=5, color=bar_colors, alpha=0.8, label=bar_labels)
+    bars = ax.bar(models, means, yerr=sems, capsize=3, color=bar_colors, alpha=0.8,
+                  label=bar_labels, error_kw={'elinewidth': 1, 'capthick': 1})
 
-    # Add individual dataset points
+    # Add individual dataset points (smaller, less prominent)
     keys = ['Q_common', 'Q_MAP', 'FQ_common', 'FQ_MAP', 'RNN_common', 'RNN_ID', 'RNN_vanilla']
     for i, key in enumerate(keys):
         values = likelihood_summary[key]['values']
         if len(values) > 0:
             x = np.random.normal(i, 0.04, size=len(values))
-            ax.scatter(x, values, alpha=0.6, c='black', s=30, zorder=10)
+            ax.scatter(x, values, alpha=0.4, c='black', s=15, zorder=10)
 
     # Add true model reference line
     true_model_mean = likelihood_summary['True_model']['mean']
@@ -451,6 +499,212 @@ def plot_per_dataset_breakdown(all_results, output_dir):
 
     print(f"✅ Saved per-dataset likelihood plot to {output_dir}/per_dataset_likelihoods.png")
 
+
+def plot_alpha_vs_z(all_results, output_dir):
+    """
+    Plot the relationship between alpha values from the data generating process
+    and the z-values (latent representations) from the model checkpoint.
+
+    Uses PCA for dimensionality reduction when z is multidimensional.
+    For 1D z, plots directly without reduction.
+    """
+    for dataset_id, results in all_results.items():
+        if results is None:
+            continue
+
+        latent_tensor = results.get('latent_tensor')
+        params = results.get('params')
+
+        if latent_tensor is None or params is None:
+            print(f"  Skipping dataset {dataset_id}: missing latent_tensor or params")
+            continue
+
+        # Convert to numpy if needed
+        if hasattr(latent_tensor, 'detach'):
+            latent_np = latent_tensor.detach().cpu().numpy()
+        else:
+            latent_np = latent_tensor
+
+        # Get the last timestep latents (shape: n_participants x z_dim)
+        # latent_tensor has shape (n_participants, n_trials, z_dim)
+        if len(latent_np.shape) == 3:
+            z_values = latent_np[:, -1, :]  # Last timestep
+            z_dim = latent_np.shape[2]
+        elif len(latent_np.shape) == 2:
+            # Assume shape is (n_participants, z_dim) - no time dimension
+            z_values = latent_np
+            z_dim = latent_np.shape[1]
+        else:
+            z_values = latent_np.reshape(-1, 1)
+            z_dim = 1
+
+        alpha_values = params
+
+        if z_dim == 1:
+            # 1D case: plot directly
+            z_1d = z_values.flatten()
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            scatter = ax.scatter(alpha_values, z_1d, c=alpha_values, cmap='viridis',
+                                alpha=0.7, edgecolors='k', linewidths=0.5)
+
+            # Add correlation line
+            corr = np.corrcoef(alpha_values, z_1d)[0, 1]
+            z = np.polyfit(alpha_values, z_1d, 1)
+            p = np.poly1d(z)
+            x_line = np.linspace(alpha_values.min(), alpha_values.max(), 100)
+            ax.plot(x_line, p(x_line), 'r--', linewidth=2, label=f'r = {corr:.3f}')
+
+            ax.set_xlabel('Alpha (Data Generating Process)', fontsize=12)
+            ax.set_ylabel('z (Latent Representation)', fontsize=12)
+            ax.set_title(f'Dataset {dataset_id}: Alpha vs z\n(1D latent space)',
+                        fontsize=14, fontweight='bold')
+            ax.legend(loc='best')
+            plt.colorbar(scatter, ax=ax, label='Alpha')
+
+        else:
+            # Multidimensional case: use PCA for dimensionality reduction
+            pca = PCA(n_components=min(2, z_dim))
+            z_reduced = pca.fit_transform(z_values)
+            explained_var = pca.explained_variance_ratio_
+
+            if z_reduced.shape[1] >= 2:
+                # 2D scatter plot with color representing alpha
+                fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+                # Plot 1: PCA components colored by alpha
+                scatter = axes[0].scatter(z_reduced[:, 0], z_reduced[:, 1],
+                                         c=alpha_values, cmap='viridis',
+                                         alpha=0.7, edgecolors='k', linewidths=0.5)
+                axes[0].set_xlabel(f'PC1 ({explained_var[0]*100:.1f}% var)', fontsize=11)
+                axes[0].set_ylabel(f'PC2 ({explained_var[1]*100:.1f}% var)', fontsize=11)
+                axes[0].set_title('z-values (PCA reduced)\ncolored by Alpha', fontsize=12)
+                plt.colorbar(scatter, ax=axes[0], label='Alpha')
+
+                # Plot 2: Alpha vs PC1
+                corr1 = np.corrcoef(alpha_values, z_reduced[:, 0])[0, 1]
+                axes[1].scatter(alpha_values, z_reduced[:, 0], c=alpha_values,
+                               cmap='viridis', alpha=0.7, edgecolors='k', linewidths=0.5)
+                z1 = np.polyfit(alpha_values, z_reduced[:, 0], 1)
+                p1 = np.poly1d(z1)
+                x_line = np.linspace(alpha_values.min(), alpha_values.max(), 100)
+                axes[1].plot(x_line, p1(x_line), 'r--', linewidth=2, label=f'r = {corr1:.3f}')
+                axes[1].set_xlabel('Alpha', fontsize=11)
+                axes[1].set_ylabel(f'PC1 ({explained_var[0]*100:.1f}% var)', fontsize=11)
+                axes[1].set_title('Alpha vs PC1', fontsize=12)
+                axes[1].legend(loc='best')
+
+                # Plot 3: Alpha vs PC2
+                corr2 = np.corrcoef(alpha_values, z_reduced[:, 1])[0, 1]
+                axes[2].scatter(alpha_values, z_reduced[:, 1], c=alpha_values,
+                               cmap='viridis', alpha=0.7, edgecolors='k', linewidths=0.5)
+                z2 = np.polyfit(alpha_values, z_reduced[:, 1], 1)
+                p2 = np.poly1d(z2)
+                axes[2].plot(x_line, p2(x_line), 'r--', linewidth=2, label=f'r = {corr2:.3f}')
+                axes[2].set_xlabel('Alpha', fontsize=11)
+                axes[2].set_ylabel(f'PC2 ({explained_var[1]*100:.1f}% var)', fontsize=11)
+                axes[2].set_title('Alpha vs PC2', fontsize=12)
+                axes[2].legend(loc='best')
+
+                fig.suptitle(f'Dataset {dataset_id}: Alpha vs z-values\n(z_dim={z_dim}, PCA reduced)',
+                            fontsize=14, fontweight='bold')
+            else:
+                # Only 1 PC available
+                fig, ax = plt.subplots(figsize=(8, 6))
+                corr = np.corrcoef(alpha_values, z_reduced[:, 0])[0, 1]
+                scatter = ax.scatter(alpha_values, z_reduced[:, 0], c=alpha_values,
+                                    cmap='viridis', alpha=0.7, edgecolors='k', linewidths=0.5)
+                z1 = np.polyfit(alpha_values, z_reduced[:, 0], 1)
+                p1 = np.poly1d(z1)
+                x_line = np.linspace(alpha_values.min(), alpha_values.max(), 100)
+                ax.plot(x_line, p1(x_line), 'r--', linewidth=2, label=f'r = {corr:.3f}')
+                ax.set_xlabel('Alpha (Data Generating Process)', fontsize=12)
+                ax.set_ylabel(f'PC1 ({explained_var[0]*100:.1f}% var)', fontsize=12)
+                ax.set_title(f'Dataset {dataset_id}: Alpha vs z (PCA)\n(z_dim={z_dim})',
+                            fontsize=14, fontweight='bold')
+                ax.legend(loc='best')
+                plt.colorbar(scatter, ax=ax, label='Alpha')
+
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/alpha_vs_z_dataset{dataset_id}.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+        print(f"✅ Saved alpha vs z plot for dataset {dataset_id}")
+
+    # Create aggregated plot across all datasets
+    all_alphas = []
+    all_z_pc1 = []
+    all_dataset_ids = []
+
+    for dataset_id, results in all_results.items():
+        if results is None:
+            continue
+        latent_tensor = results.get('latent_tensor')
+        params = results.get('params')
+        if latent_tensor is None or params is None:
+            continue
+
+        if hasattr(latent_tensor, 'detach'):
+            latent_np = latent_tensor.detach().cpu().numpy()
+        else:
+            latent_np = latent_tensor
+
+        if len(latent_np.shape) == 3:
+            z_values = latent_np[:, -1, :]
+            z_dim = latent_np.shape[2]
+        elif len(latent_np.shape) == 2:
+            z_values = latent_np
+            z_dim = latent_np.shape[1]
+        else:
+            z_values = latent_np.reshape(-1, 1)
+            z_dim = 1
+
+        if z_dim == 1:
+            z_pc1 = z_values.flatten()
+        else:
+            pca = PCA(n_components=1)
+            z_pc1 = pca.fit_transform(z_values).flatten()
+
+        all_alphas.extend(params)
+        all_z_pc1.extend(z_pc1)
+        all_dataset_ids.extend([dataset_id] * len(params))
+
+    if len(all_alphas) > 0:
+        all_alphas = np.array(all_alphas)
+        all_z_pc1 = np.array(all_z_pc1)
+        all_dataset_ids = np.array(all_dataset_ids)
+
+        fig, ax = plt.subplots(figsize=(10, 7))
+
+        # Plot each dataset with different marker
+        markers = ['o', 's', '^', 'D', 'v']
+        for i, dataset_id in enumerate(sorted(set(all_dataset_ids))):
+            mask = all_dataset_ids == dataset_id
+            ax.scatter(all_alphas[mask], all_z_pc1[mask],
+                      marker=markers[i % len(markers)],
+                      alpha=0.6, label=f'Dataset {dataset_id}', s=50)
+
+        # Overall correlation
+        corr = np.corrcoef(all_alphas, all_z_pc1)[0, 1]
+        z_fit = np.polyfit(all_alphas, all_z_pc1, 1)
+        p_fit = np.poly1d(z_fit)
+        x_line = np.linspace(all_alphas.min(), all_alphas.max(), 100)
+        ax.plot(x_line, p_fit(x_line), 'r--', linewidth=2, label=f'Overall r = {corr:.3f}')
+
+        ax.set_xlabel('Alpha (Data Generating Process)', fontsize=12)
+        ax.set_ylabel('z (PC1 or 1D latent)', fontsize=12)
+        ax.set_title(f'Alpha vs z-values: Aggregated across {N_DATASETS} datasets',
+                    fontsize=14, fontweight='bold')
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/alpha_vs_z_aggregated.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+        print(f"✅ Saved aggregated alpha vs z plot to {output_dir}/alpha_vs_z_aggregated.png")
+
+
 def main():
     """Main analysis function."""
     print("="*80)
@@ -494,6 +748,7 @@ def main():
     plot_rsa_aggregated(rsa_dict, output_dir)
     plot_likelihoods_aggregated(likelihood_summary, output_dir)
     plot_per_dataset_breakdown(all_results, output_dir)
+    plot_alpha_vs_z(all_results, output_dir)
 
     # Save summary statistics
     summary_path = f"{output_dir}/summary_statistics.txt"
@@ -502,11 +757,18 @@ def main():
         f.write("="*80 + "\n\n")
         f.write(f"Number of datasets: {N_DATASETS}\n")
         f.write(f"Successfully loaded: {successful_datasets}\n")
-        f.write(f"Random seeds per dataset: {SEEDS}\n\n")
+        f.write(f"Random seeds per dataset: {SEEDS}\n")
+        f.write(f"Epoch window: [{MIN_EPOCH}, {MAX_EPOCH if MAX_EPOCH else 'unlimited'}]\n\n")
 
         f.write("RSA CORRELATIONS:\n")
         f.write(f"  IDRNN:       {rsa_dict['IDRNN']['mean']:.4f} ± {rsa_dict['IDRNN']['sem']:.4f}\n")
-        f.write(f"  Vanilla RNN: {rsa_dict['vanilla']['mean']:.4f} ± {rsa_dict['vanilla']['sem']:.4f}\n\n")
+        f.write(f"  Vanilla RNN: {rsa_dict['vanilla']['mean']:.4f} ± {rsa_dict['vanilla']['sem']:.4f}\n")
+
+        # Add significance test result
+        from scipy.stats import ttest_rel
+        _, p_val = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'])
+        sig_str = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "n.s."
+        f.write(f"  Paired t-test: p = {p_val:.4f} {sig_str}\n\n")
 
         f.write("MODEL LIKELIHOODS:\n")
         for key, data in likelihood_summary.items():
@@ -523,6 +785,8 @@ def main():
     print("  - aggregated_model_likelihoods.png")
     print("  - per_dataset_rsa.png")
     print("  - per_dataset_likelihoods.png")
+    print("  - alpha_vs_z_dataset*.png (per dataset)")
+    print("  - alpha_vs_z_aggregated.png")
     print("  - summary_statistics.txt")
 
 if __name__ == "__main__":

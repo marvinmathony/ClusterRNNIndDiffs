@@ -126,8 +126,13 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_id', type=int, help="dataset ID for multi-dataset experiments", default=0)
     parser.add_argument('--joint', type=lambda x: x.lower() == 'true', help="joint training (True) vs two-step (False)", default=False)
     parser.add_argument('--beta', type=float, help="KL weight for joint training (beta-VAE style)", default=0.1)
-    parser.add_argument('--epochs', type=int, help="number of training epochs", default=10000)
+    parser.add_argument('--epochs', type=int, help="number of training epochs (Step 2)", default=10000)
+    parser.add_argument('--step1_epochs', type=int, help="number of Step 1 (decoder pretraining) epochs; if None, uses --epochs", default=None)
     args = parser.parse_args()
+
+    # Step 1 epochs defaults to main epochs if not specified
+    if args.step1_epochs is None:
+        args.step1_epochs = args.epochs
 
     DATASET_ID = args.dataset_id
     DATA_DIR = f"data_dataset{DATASET_ID}"
@@ -236,6 +241,7 @@ if __name__ == '__main__':
 
     config_dict.update({
         "epochs": epochs,
+        "step1_epochs": args.step1_epochs,
         "hidden": hidden,
         "z_dim": z_dim,
         "A": A,
@@ -296,14 +302,17 @@ if __name__ == '__main__':
             decoder = Decoder(in_dim=in_dim, z_dim=z_dim, hid=hidden)
             model = LatentRNNz(encoder=encoder, decoder = decoder, hid=hidden, z_dim=z_dim, in_dim=in_dim, A=A, block_structure=False).to(device)
 
+            # Step 1: Train decoder with lookup embeddings
+            step1_epochs = args.step1_epochs
+            print(f"[Step 1] Training decoder for {step1_epochs} epochs...")
             if palminteri or sloutsky:
                 B_val,_,_ = xin_val.shape
                 val_ids = torch.arange(B_val)
                 model, train_loss, val_loss, pA_dict, training_dict = train_latentrnn_noblocks_palminteri(model=model, ids_train=ids, X_train=xin_train,
-                y_onehot=c_train, ids_val=val_ids, X_val=xin_val, y_val_onehot=c_val, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
+                y_onehot=c_train, ids_val=val_ids, X_val=xin_val, y_val_onehot=c_val, epochs=step1_epochs, lr=1e-3, weight_decay=1e-4, device=device)
             else:
                 model, train_loss, kl_vals, pA_dict, training_dict = train_latentrnn_noblocks(model=model, ids_train=ids, ids_test=idstest, X_train=xin_train,
-                y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test,train_alpha_values= params_train, p_target=pA, p_test_target=pA_test, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
+                y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test,train_alpha_values= params_train, p_target=pA, p_test_target=pA_test, epochs=step1_epochs, lr=1e-3, weight_decay=1e-4, device=device)
             z_lookup = training_dict["z"]
             wandb.finish()
             wandb.init(project=wandb_name, config=args)

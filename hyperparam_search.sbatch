@@ -33,8 +33,8 @@ conda activate RNNproject
 TASK_ID=$SLURM_ARRAY_TASK_ID
 
 # Parameter grid
-LAMBDAS=(0.05 0.08 0.1 0.12 0.15)
-Z_DIMS=(3 4 5)
+LAMBDAS=(0 0.01 0.02 0.03 0.04)
+Z_DIMS=(2 3 4)
 SEEDS=(12 50)  # Only 2 seeds for fast exploration
 EPOCHS=3000    # Reduced from 10000
 DATASET_ID=0   # Single dataset for fast search

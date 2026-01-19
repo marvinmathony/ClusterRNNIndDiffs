@@ -184,8 +184,10 @@ if latent:
         torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{latent_nametag}_sloutsky_traindata.pt")
         print(f"latent tensor with dim {latent_tensor.shape} saved under {DATA_DIR}/latents_tensor_sloutsky.pt")
     else:
-        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{latent_nametag}{SEED_FOR_ANALYSIS}.pt")
+        # Save with consistent naming (no seed suffix) - one file per model type
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{latent_nametag}.pt")
         torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{latent_nametag}_traindata.pt")
+        print(f"Latent tensor saved under {DATA_DIR}/latents_tensor{latent_nametag}.pt (seed {SEED_FOR_ANALYSIS}, epoch {best_epoch})")
         if model_fitting:
 
             model_eval_df.to_csv(f"{DATA_DIR}/model_eval_df{latent_nametag}.csv", index=False)
@@ -200,8 +202,9 @@ else:
         torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{vanilla_nametag}_sloutsky.pt")
         torch.save(latent_tensor_train, f"{DATA_DIR}/latents_tensor{vanilla_nametag}_sloutsky_traindata.pt")
     else:
-        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{vanilla_nametag}{SEED_FOR_ANALYSIS}.pt")
-        print(f"latent saved under {DATA_DIR}/latents_tensor{vanilla_nametag}{SEED_FOR_ANALYSIS}.pt")
+        # Save with consistent naming (no seed suffix) - one file per model type
+        torch.save(latent_tensor, f"{DATA_DIR}/latents_tensor{vanilla_nametag}.pt")
+        print(f"Latent tensor saved under {DATA_DIR}/latents_tensor{vanilla_nametag}.pt (seed {SEED_FOR_ANALYSIS}, epoch {best_epoch})")
         if model_fitting:
 
             model_eval_df.to_csv(f"{DATA_DIR}/model_eval_df{vanilla_nametag}.csv", index=False)
