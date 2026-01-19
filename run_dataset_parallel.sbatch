@@ -47,8 +47,8 @@ export PYTHONUNBUFFERED=1
 export CUDA_VISIBLE_DEVICES=0
 
 # Configuration
-LMBD=0.5
-Z_DIM=3
+LMBD=0.8
+Z_DIM=1
 SEEDS=(12 50 76 100 142)
 
 # Step 1: Generate data
@@ -87,7 +87,7 @@ python select_best_epoch_by_rsa.py --latent False --dataset_id $DATASET_ID
 
 # Step 5: Test models
 echo "Testing models for dataset $DATASET_ID..."
-python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting True
-python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting True
+python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting False
+python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting False
 
 echo "Dataset $DATASET_ID completed at: $(date)"

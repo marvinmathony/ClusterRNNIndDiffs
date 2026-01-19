@@ -124,6 +124,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, help="random seed", default=42)
     parser.add_argument('--latent', type=lambda x: x.lower() == 'true', help="latent or vanilla modeling", default=False)
     parser.add_argument('--dataset_id', type=int, help="dataset ID for multi-dataset experiments", default=0)
+    parser.add_argument('--joint', type=lambda x: x.lower() == 'true', help="joint training (True) vs two-step (False)", default=False)
+    parser.add_argument('--beta', type=float, help="KL weight for joint training (beta-VAE style)", default=0.1)
+    parser.add_argument('--epochs', type=int, help="number of training epochs", default=10000)
     args = parser.parse_args()
 
     DATASET_ID = args.dataset_id
@@ -187,8 +190,13 @@ if __name__ == '__main__':
 
 
     # directories for model checkpoints and RSA's
-    BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
-    run_dir = os.path.join(BASE_DIR, f"seed_{seed_value}")
+    # Support custom run directory via environment variable (for hyperparameter search)
+    HP_RUN_DIR = os.environ.get("HP_RUN_DIR")
+    if HP_RUN_DIR and latent:
+        run_dir = HP_RUN_DIR
+    else:
+        BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
+        run_dir = os.path.join(BASE_DIR, f"seed_{seed_value}")
     ckpt_dir = os.path.join(run_dir, "checkpoints")
     rsa_dir  = os.path.join(run_dir, "rsa")
     lossdir = os.path.join(run_dir, "loss")
@@ -204,7 +212,7 @@ if __name__ == '__main__':
     lamda = args.lmbd
     A = 2
     hidden = 10
-    epochs = 10000
+    epochs = args.epochs
 
     # Get dimensions from loaded data
     if not (palminteri or sloutsky):
@@ -253,56 +261,84 @@ if __name__ == '__main__':
         json.dump(config_dict, f, indent=2)
 
     if latent:
-        
-        ids = torch.arange(B)
-        idstest = torch.arange(B_test)
-        encoder = LookupEncoderZ(n_participants=B, z_dim=z_dim)
-        decoder = Decoder(in_dim=in_dim, z_dim=z_dim, hid=hidden)
-        model = LatentRNNz(encoder=encoder, decoder = decoder, hid=hidden, z_dim=z_dim, in_dim=in_dim, A=A, block_structure=False).to(device)
-            
-        if palminteri or sloutsky:
-            B_val,_,_ = xin_val.shape
-            val_ids = torch.arange(B_val)
-            model, train_loss, val_loss, pA_dict, training_dict = train_latentrnn_noblocks_palminteri(model=model, ids_train=ids, X_train=xin_train,
-            y_onehot=c_train, ids_val=val_ids, X_val=xin_val, y_val_onehot=c_val, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
-        else:
-            model, train_loss, kl_vals, pA_dict, training_dict = train_latentrnn_noblocks(model=model, ids_train=ids, ids_test=idstest, X_train=xin_train,
-            y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test,train_alpha_values= params_train, p_target=pA, p_test_target=pA_test, epochs=20000, lr=1e-3, weight_decay=1e-4, device=device)
-        z_lookup = training_dict["z"]
-        wandb.finish()
-        wandb.init(project=wandb_name, config=args)
-        
-        #second step
-        encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=10)
-        frozen_decoder = copy.deepcopy(model.decoder)
-        frozen_decoder_path = os.path.join(frozen_decoder_dir, f"policy_model.pt")
-        torch.save(model.state_dict(), frozen_decoder_path)
-        for p in frozen_decoder.parameters():
-            p.requires_grad = False
-        latent_secondstep = LatentRNN_secondstep(encoder=encoder_IDRNN, hid=hidden, z_dim=z_dim,in_dim=in_dim, A=A,
-        decoder=frozen_decoder)
-        latent_secondstep.name = "GRU" # "LatentDistillation"
-        latent_secondstep.to(device)
-        xenc_train = xin_train.unsqueeze(1)                                # (B, 1, T, 4)
-        y_train    = torch.argmax(choice_one_hot_train, dim=-1).unsqueeze(1)  # (B, 1, T)
 
-        lookup_z   = z_lookup.to(device)
-        #y_test = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
+        if args.joint:
+            # === JOINT TRAINING: encoder + decoder trained together from scratch ===
+            print(f"[JOINT TRAINING] beta={args.beta}")
 
-        if palminteri or sloutsky:
-            z_val_lookup = training_dict["z_val"]
-            lookup_z_val = z_val_lookup.to(device)
-            xenc_val = xin_val.unsqueeze(1)
-            y_val = torch.argmax(choice_one_hot_val, dim=-1).unsqueeze(1)
-            model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN_palminteri(model=latent_secondstep, xenc=xenc_train,
-            blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_val, y_val=y_val, z_val_lookup=lookup_z_val, epochs=5000, patience=600, lr=1e-3)
-        else:
-            #think about whether I want to implement test data here too
+            encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=hidden)
+            decoder = Decoder(in_dim=in_dim, z_dim=z_dim, hid=hidden)
+            # Both encoder and decoder are trainable
+            joint_model = LatentRNN_secondstep(
+                encoder=encoder_IDRNN, hid=hidden, z_dim=z_dim,
+                in_dim=in_dim, A=A, decoder=decoder
+            )
+            joint_model.name = "IDRNN_joint"
+            joint_model.to(device)
+
+            xenc_train = xin_train.unsqueeze(1)
+            y_train = torch.argmax(choice_one_hot_train, dim=-1).unsqueeze(1)
             xenc_test = xin_test.unsqueeze(1)
-            y_test    = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
-            print(f"targets: {y_test}")
-            model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN(model=latent_secondstep, xenc=xenc_train,
-            blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, device=device,ctest=c_test, ctrain=c_train,alpha_values_test=params, checkpoint_dir=ckpt_dir,rsa_dir=rsa_dir, loss_dir = lossdir, epochs=epochs, patience=epochs, lr=1e-3, lmbd = lamda)
+            y_test = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
+
+            model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_IDRNN_joint(
+                model=joint_model, xenc=xenc_train, blocks=xenc_train, y=y_train,
+                xenc_val=xenc_test, y_val=y_test, p_target=pA, device=device,
+                ctest=c_test, ctrain=c_train, alpha_values_test=params,
+                checkpoint_dir=ckpt_dir, rsa_dir=rsa_dir, loss_dir=lossdir,
+                epochs=epochs, lr=1e-3, beta=args.beta
+            )
+        else:
+            # === TWO-STEP TRAINING: original approach ===
+            ids = torch.arange(B)
+            idstest = torch.arange(B_test)
+            encoder = LookupEncoderZ(n_participants=B, z_dim=z_dim)
+            decoder = Decoder(in_dim=in_dim, z_dim=z_dim, hid=hidden)
+            model = LatentRNNz(encoder=encoder, decoder = decoder, hid=hidden, z_dim=z_dim, in_dim=in_dim, A=A, block_structure=False).to(device)
+
+            if palminteri or sloutsky:
+                B_val,_,_ = xin_val.shape
+                val_ids = torch.arange(B_val)
+                model, train_loss, val_loss, pA_dict, training_dict = train_latentrnn_noblocks_palminteri(model=model, ids_train=ids, X_train=xin_train,
+                y_onehot=c_train, ids_val=val_ids, X_val=xin_val, y_val_onehot=c_val, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
+            else:
+                model, train_loss, kl_vals, pA_dict, training_dict = train_latentrnn_noblocks(model=model, ids_train=ids, ids_test=idstest, X_train=xin_train,
+                y_onehot=choice_one_hot_train, X_test=xin_test, y_test_onehot=choice_one_hot_test,train_alpha_values= params_train, p_target=pA, p_test_target=pA_test, epochs=epochs, lr=1e-3, weight_decay=1e-4, device=device)
+            z_lookup = training_dict["z"]
+            wandb.finish()
+            wandb.init(project=wandb_name, config=args)
+
+            #second step
+            encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=10)
+            frozen_decoder = copy.deepcopy(model.decoder)
+            frozen_decoder_path = os.path.join(frozen_decoder_dir, f"policy_model.pt")
+            torch.save(model.state_dict(), frozen_decoder_path)
+            for p in frozen_decoder.parameters():
+                p.requires_grad = False
+            latent_secondstep = LatentRNN_secondstep(encoder=encoder_IDRNN, hid=hidden, z_dim=z_dim,in_dim=in_dim, A=A,
+            decoder=frozen_decoder)
+            latent_secondstep.name = "GRU" # "LatentDistillation"
+            latent_secondstep.to(device)
+            xenc_train = xin_train.unsqueeze(1)                                # (B, 1, T, 4)
+            y_train    = torch.argmax(choice_one_hot_train, dim=-1).unsqueeze(1)  # (B, 1, T)
+
+            lookup_z   = z_lookup.to(device)
+            #y_test = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
+
+            if palminteri or sloutsky:
+                z_val_lookup = training_dict["z_val"]
+                lookup_z_val = z_val_lookup.to(device)
+                xenc_val = xin_val.unsqueeze(1)
+                y_val = torch.argmax(choice_one_hot_val, dim=-1).unsqueeze(1)
+                model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN_palminteri(model=latent_secondstep, xenc=xenc_train,
+                blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_val, y_val=y_val, z_val_lookup=lookup_z_val, epochs=5000, patience=600, lr=1e-3)
+            else:
+                #think about whether I want to implement test data here too
+                xenc_test = xin_test.unsqueeze(1)
+                y_test    = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
+                print(f"targets: {y_test}")
+                model, best_mu, best_lv, train_elbos, val_elbos, training_dict, pA_rnn_dict = train_latentrnn_IDRNN(model=latent_secondstep, xenc=xenc_train,
+                blocks=xenc_train, y=y_train, lookup_z=lookup_z, xenc_val=xenc_test, y_val=y_test, p_target= pA, device=device,ctest=c_test, ctrain=c_train,alpha_values_test=params, checkpoint_dir=ckpt_dir,rsa_dir=rsa_dir, loss_dir = lossdir, epochs=epochs, patience=epochs, lr=1e-3, lmbd = lamda)
 
     else:
         

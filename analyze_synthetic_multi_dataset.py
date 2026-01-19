@@ -245,26 +245,41 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
     sems = [rsa_dict['IDRNN']['sem'], rsa_dict['vanilla']['sem']]
 
     bar_colors = ['tab:blue', 'tab:orange']
+    x_pos = np.arange(len(models))
 
+    # Draw bars without error bars first (for cleaner look)
     bars = ax.bar(
-        models,
+        x_pos,
         means,
-        yerr=sems,
-        capsize=5,
         color=bar_colors,
-        alpha=0.8
+        alpha=0.7,
+        width=0.6
     )
 
-    # Add individual dataset points
+    # Add individual dataset points with jitter
+    np.random.seed(42)  # For reproducible jitter
     for i, model in enumerate(models):
         corrs = rsa_dict[model]['corrs']
-        x = np.random.normal(i, 0.04, size=len(corrs))
-        ax.scatter(x, corrs, alpha=0.6, c='black', s=30, zorder=10)
+        jitter = np.random.uniform(-0.15, 0.15, size=len(corrs))
+        ax.scatter(x_pos[i] + jitter, corrs, alpha=0.8, c='black', s=50, zorder=10,
+                   edgecolors='white', linewidths=0.5, label='Individual datasets' if i == 0 else None)
+
+    # Add SEM error bars on top (as separate elements for visibility)
+    ax.errorbar(x_pos, means, yerr=sems, fmt='none', capsize=8, capthick=2,
+                ecolor='black', elinewidth=2, zorder=11)
+
+    # Add mean value annotations
+    for i, (mean, sem) in enumerate(zip(means, sems)):
+        ax.text(x_pos[i], mean + sems[i] + 0.02, f'{mean:.3f}±{sem:.3f}',
+                ha='center', va='bottom', fontsize=10, fontweight='bold')
 
     ax.set_ylabel('Correlation with ground truth', fontsize=12)
     ax.set_title(f'RSA: Model Latent Geometry vs Ground Truth\n(Aggregated across {N_DATASETS} datasets)',
                  fontsize=14, fontweight='bold')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(models)
     ax.set_ylim(bottom=0)
+    ax.legend(loc='lower right')
 
     plt.tight_layout()
     plt.savefig(f"{output_dir}/aggregated_rsa_correlation.png", dpi=300, bbox_inches='tight')

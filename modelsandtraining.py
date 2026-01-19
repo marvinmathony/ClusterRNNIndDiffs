@@ -1191,3 +1191,154 @@ def train_ablated_noblocks(model, X_train, y_train, X_test, y_test, device, ctes
             #"normalized_ll": normalized_ll}
     return model, train_elbos, val_elbos, kl_vals, pA_per_epoch, training_dict
 
+
+def train_IDRNN_joint(model, xenc, blocks, y, xenc_val, y_val, p_target, device, ctest, ctrain,
+                      alpha_values_test, checkpoint_dir, rsa_dir, loss_dir,
+                      epochs=10000, lr=1e-3, beta=0.1):
+    """
+    Joint end-to-end training of IDRNN encoder + decoder.
+
+    Key difference from two-step training:
+    - Encoder and decoder are trained together from scratch
+    - KL regularizer toward standard normal prior (not lookup embeddings)
+    - beta controls KL weight (like beta-VAE)
+
+    Args:
+        model: LatentRNN_secondstep with trainable encoder AND decoder
+        xenc: encoder input (B, 1, T, in_dim)
+        blocks: decoder input (B, 1, T, in_dim) - same as xenc here
+        y: action labels (B, 1, T)
+        xenc_val: validation encoder input
+        y_val: validation labels
+        p_target: target action probabilities for KL monitoring
+        beta: weight on KL divergence to prior (start small, e.g., 0.01-0.1)
+    """
+    train_losses = []
+    val_losses = []
+    kl_to_prior_vals = []
+    best_val_acc = 0
+    best_RSA_corr = 0
+    best_epoch = 0
+    best_state = None
+    pA_per_epoch = {}
+
+    # ALL parameters are trainable (encoder + decoder)
+    opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+
+    for ep in range(1, epochs + 1):
+        model.train()
+        opt.zero_grad()
+
+        # Forward pass - encoder produces mu, logvar; decoder predicts actions
+        logits, mu, lv, z, h0_ = model(xenc, blocks, sample_z=True)  # sample during training
+
+        # Policy loss (cross-entropy on action prediction)
+        B, Bk, T, A = logits.shape
+        policy_loss = F.cross_entropy(logits.reshape(-1, A), y.reshape(-1).long(), reduction='mean')
+
+        # KL divergence to standard normal prior: KL(q(z|x) || N(0,1))
+        # For per-timestep z: mu, lv have shape (B, 1, T, z_dim)
+        # KL = 0.5 * sum(mu^2 + var - 1 - log(var))
+        kl_to_prior = 0.5 * (mu.pow(2) + lv.exp() - 1 - lv).mean()
+
+        # Total loss
+        loss = policy_loss + beta * kl_to_prior
+        loss.backward()
+        opt.step()
+
+        train_losses.append(loss.item())
+        kl_to_prior_vals.append(kl_to_prior.item())
+
+        # Training accuracy
+        preds = logits.reshape(-1, A).argmax(dim=-1)
+        targets = y.reshape(-1).long()
+        train_acc = (preds == targets).float().mean().item()
+
+        # Validation
+        model.eval()
+        with torch.no_grad():
+            val_logits, mu_val, lv_val, _, _ = model(xenc_val, xenc_val, sample_z=False)
+            val_policy_loss = F.cross_entropy(val_logits.reshape(-1, A), y_val.reshape(-1).long(), reduction='mean')
+            val_kl = 0.5 * (mu_val.pow(2) + lv_val.exp() - 1 - lv_val).mean()
+            val_loss = val_policy_loss + beta * val_kl
+            val_losses.append(val_loss.item())
+
+            # Validation accuracy
+            val_preds = val_logits.reshape(-1, A).argmax(dim=-1)
+            val_targets = y_val.reshape(-1).long()
+            val_acc = (val_preds == val_targets).float().mean().item()
+
+        # Checkpointing and RSA logging (same as your existing code)
+        if ep % 100 == 0 or ep == 1:
+            ckpt_path = os.path.join(checkpoint_dir, f"epoch{ep:04d}.pt")
+            torch.save(model.state_dict(), ckpt_path)
+
+            print(f"[IDRNN_joint] ep {ep:4d}  loss {loss.item():.3f}  "
+                  f"policy {policy_loss.item():.3f}  kl_prior {kl_to_prior.item():.3f}  "
+                  f"train_acc {train_acc:.3f}  val_acc {val_acc:.3f}")
+
+            # RSA evaluation
+            _, latent_tensor, _, _ = compute_rnn_likelihoods_torch(
+                test_latentrnn_secondstep_causal_posterior_weighting,
+                model, xenc_val.squeeze(1), ctest, xenc.squeeze(1),
+                latent=True, choice_train=None, id=True
+            )
+            distance_matrix_latents, _ = plf.rsa_latents(
+                latents=latent_tensor, metric="euclidean",
+                title="joint_training", reduction="last",
+                plot=False, original_data=False, cluster_order=False
+            )
+            distance_matrix_params, _ = plf.rsa_latents(
+                latents=alpha_values_test, metric="euclidean",
+                title="test_params", reduction="entire",
+                plot=False, original_data=True, cluster_order=False
+            )
+            vec_params = vectorize_rsa(distance_matrix_params)
+            vec_latents = vectorize_rsa(distance_matrix_latents)
+            corr_matrix = np.corrcoef(vec_params, vec_latents)[0, 1]
+
+            # Save RSA and loss
+            np.save(os.path.join(rsa_dir, f"epoch_{ep:04d}.npy"), vec_latents)
+            np.save(os.path.join(loss_dir, f"epoch_{ep:04d}.npy"), loss.cpu().item())
+
+            wandb.log({
+                "CE_loss": policy_loss.item(),
+                "KL_to_prior": kl_to_prior.item(),
+                "total_loss": loss.item(),
+                "accuracy_test": val_acc,
+                "RSA_correlation": corr_matrix
+            }, step=ep)
+
+        # Track best by RSA correlation (or change to val_acc if preferred)
+        if ep % 100 == 0:
+            if corr_matrix > best_RSA_corr:
+                best_RSA_corr = corr_matrix
+                best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+                best_epoch = ep
+
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+
+    # Load best model
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    model.eval()
+    with torch.no_grad():
+        logits_best, mu_best, lv_best, z_best, h0_best = model(xenc, blocks, sample_z=False)
+        pA_best = F.softmax(logits_best, dim=-1).squeeze(1)[:, :, 0]
+        pA_per_epoch[str(best_epoch)] = pA_best
+
+    training_dict = {
+        "predictions": pA_best,
+        "weights": best_state,
+        "best_model": model,
+        "best_epoch": best_epoch,
+        "best_RSA_corr": best_RSA_corr,
+        "z": mu_best,
+        "h0": h0_best
+    }
+
+    print(f"Best RSA correlation: {best_RSA_corr:.3f} at epoch {best_epoch}")
+
+    return model, mu_best, lv_best, train_losses, val_losses, training_dict, pA_per_epoch

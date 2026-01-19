@@ -26,6 +26,10 @@ data_dataset1/
 data_dataset2/
 data_dataset3/
 data_dataset4/
+hp_search_runs/
+runs_dataset99/
+data_dataset99/
+hp_search_results/
 
 # Python cache files
 __pycache__/
