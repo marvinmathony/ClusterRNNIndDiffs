@@ -39,11 +39,11 @@ export CUDA_VISIBLE_DEVICES=0
 
 # Run testing for latent model (IDRNN with z=2, lmbd=0.5)
 echo "Testing latent model..."
-python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting False
+python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting True
 
 # Run testing for vanilla model
 echo "Testing vanilla model..."
-python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting False
+python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting True
 
 echo "========================================"
 echo "Completed at: $(date)"

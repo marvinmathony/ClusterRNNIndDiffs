@@ -22,6 +22,12 @@ from sklearn.decomposition import PCA
 N_DATASETS = 5
 SEEDS = [12, 50, 76, 100, 142]
 
+# Vanilla model selection criterion: "composite", "rsa", or "loss"
+# - "composite": uses best_epoch_by_composite.json (RSA reliability + loss + stability)
+# - "rsa": uses best_epoch_by_rsa.json (RSA reliability only)
+# - "loss": selects epoch with lowest loss directly from loss files
+VANILLA_SELECTION_CRITERION = "loss"
+
 # Epoch window for model selection (Step 2 training)
 # IDRNN learns faster and peaks earlier than vanilla RNN.
 # Without a cutoff, vanilla eventually catches up, obscuring IDRNN's advantage.
@@ -75,6 +81,76 @@ def find_best_epoch_in_window(base_dir, seeds, vec_params, min_epoch=None, max_e
     return best_seed, best_epoch, best_rsa_corr, best_rsa_vector
 
 
+def load_best_epoch_from_json(json_path):
+    """
+    Load best epoch and seed from a pre-computed JSON file.
+    Returns (best_seed, best_epoch) or (None, None) if file not found.
+    """
+    try:
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        return data.get('best_seed'), data.get('best_epoch')
+    except FileNotFoundError:
+        return None, None
+
+
+def compute_rsa_correlation_for_epoch(base_dir, seed, epoch, vec_params):
+    """
+    Compute RSA correlation for a specific epoch and seed.
+    Returns the correlation value or None if the file doesn't exist.
+    """
+    rsa_file = os.path.join(base_dir, f"seed_{seed}", "rsa", f"epoch_{epoch}.npy")
+    try:
+        rsa_vector = np.load(rsa_file)
+        corr = np.corrcoef(vec_params, rsa_vector)[0, 1]
+        return corr
+    except FileNotFoundError:
+        print(f"Warning: RSA file not found: {rsa_file}")
+        return None
+    except Exception as e:
+        print(f"Warning: Error loading RSA file {rsa_file}: {e}")
+        return None
+
+
+def find_best_epoch_by_loss(base_dir, seeds, min_epoch=None, max_epoch=None):
+    """
+    Find the best epoch (lowest loss) within the specified window.
+    Returns best_seed, best_epoch, best_loss.
+    """
+    import glob
+
+    min_epoch = min_epoch or 0
+    max_epoch = max_epoch or float('inf')
+
+    best_seed = None
+    best_epoch = None
+    best_loss = float('inf')
+
+    for seed in seeds:
+        loss_dir = os.path.join(base_dir, f"seed_{seed}", "loss")
+        if not os.path.exists(loss_dir):
+            continue
+
+        loss_files = glob.glob(os.path.join(loss_dir, "epoch_*.npy"))
+        for loss_file in loss_files:
+            epoch = int(os.path.basename(loss_file).replace("epoch_", "").replace(".npy", ""))
+
+            # Apply epoch window filter
+            if epoch < min_epoch or epoch > max_epoch:
+                continue
+
+            try:
+                loss = float(np.load(loss_file))
+                if loss < best_loss:
+                    best_loss = loss
+                    best_seed = seed
+                    best_epoch = epoch
+            except Exception:
+                continue
+
+    return best_seed, best_epoch, best_loss
+
+
 def load_dataset_results(dataset_id):
     """Load all results for a given dataset."""
     data_dir = f"data_dataset{dataset_id}"
@@ -124,17 +200,45 @@ def load_dataset_results(dataset_id):
     vec_params = vectorize_rsa(distance_matrix_params)
     results['vec_params'] = vec_params
 
-    # Find best epoch within the specified window for both models
-    # This ensures fair comparison and prevents overtraining effects
-    latent_seed, latent_epoch, latent_rsa_corr, _ = find_best_epoch_in_window(
-        runs_dir, SEEDS, vec_params, min_epoch=MIN_EPOCH, max_epoch=MAX_EPOCH
-    )
-    vanilla_seed, vanilla_epoch, vanilla_rsa_corr, _ = find_best_epoch_in_window(
-        runs_vanilla_dir, SEEDS, vec_params, min_epoch=MIN_EPOCH, max_epoch=MAX_EPOCH
-    )
+    # Load best epoch and seed
+    # Latent models always use best_epoch_by_specificity.json
+    latent_json_path = os.path.join(runs_dir, "best_epoch_by_specificity.json")
+    latent_seed, latent_epoch = load_best_epoch_from_json(latent_json_path)
 
-    if latent_seed is None or vanilla_seed is None:
-        print(f"Warning: Could not find valid epochs for dataset {dataset_id} in window [{MIN_EPOCH}, {MAX_EPOCH}]")
+    if latent_seed is None or latent_epoch is None:
+        print(f"Warning: Could not load best epoch for latent model from {latent_json_path}")
+
+    # Vanilla models use configurable selection criterion
+    if VANILLA_SELECTION_CRITERION == "loss":
+        # Select based on lowest loss
+        vanilla_seed, vanilla_epoch, vanilla_loss = find_best_epoch_by_loss(
+            runs_vanilla_dir, SEEDS, min_epoch=MIN_EPOCH, max_epoch=MAX_EPOCH
+        )
+        if vanilla_seed is None:
+            print(f"Warning: Could not find best epoch by loss for vanilla model")
+    elif VANILLA_SELECTION_CRITERION == "composite":
+        vanilla_json_path = os.path.join(runs_vanilla_dir, "best_epoch_by_composite.json")
+        vanilla_seed, vanilla_epoch = load_best_epoch_from_json(vanilla_json_path)
+        if vanilla_seed is None or vanilla_epoch is None:
+            print(f"Warning: Could not load best epoch for vanilla model from {vanilla_json_path}")
+    else:  # "rsa" or fallback
+        vanilla_json_path = os.path.join(runs_vanilla_dir, "best_epoch_by_rsa.json")
+        vanilla_seed, vanilla_epoch = load_best_epoch_from_json(vanilla_json_path)
+        if vanilla_seed is None or vanilla_epoch is None:
+            print(f"Warning: Could not load best epoch for vanilla model from {vanilla_json_path}")
+
+    # Compute RSA correlations for the selected epochs
+    latent_rsa_corr = None
+    vanilla_rsa_corr = None
+
+    if latent_seed is not None and latent_epoch is not None:
+        latent_rsa_corr = compute_rsa_correlation_for_epoch(runs_dir, latent_seed, latent_epoch, vec_params)
+
+    if vanilla_seed is not None and vanilla_epoch is not None:
+        vanilla_rsa_corr = compute_rsa_correlation_for_epoch(runs_vanilla_dir, vanilla_seed, vanilla_epoch, vec_params)
+
+    if latent_rsa_corr is None or vanilla_rsa_corr is None:
+        print(f"Warning: Could not compute RSA correlations for dataset {dataset_id}")
         results['latent_rsa_corr'] = None
         results['vanilla_rsa_corr'] = None
         results['latent_best_epoch'] = None
@@ -149,9 +253,8 @@ def load_dataset_results(dataset_id):
         results['vanilla_best_epoch'] = vanilla_epoch
         results['vanilla_best_seed'] = vanilla_seed
 
-        if MAX_EPOCH is not None:
-            print(f"  Dataset {dataset_id}: IDRNN best @ epoch {latent_epoch} (seed {latent_seed}), "
-                  f"Vanilla best @ epoch {vanilla_epoch} (seed {vanilla_seed}) [window: {MIN_EPOCH}-{MAX_EPOCH}]")
+        print(f"  Dataset {dataset_id}: IDRNN best @ epoch {latent_epoch} (seed {latent_seed}), "
+              f"Vanilla best @ epoch {vanilla_epoch} (seed {vanilla_seed}) [vanilla criterion: {VANILLA_SELECTION_CRITERION}]")
 
     # Load latent tensors (consistent naming without seed suffix)
     # These are saved by testing_script.py with the selected best epoch/seed
@@ -290,7 +393,8 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
     means = [rsa_dict['IDRNN']['mean'], rsa_dict['vanilla']['mean']]
     sems = [rsa_dict['IDRNN']['sem'], rsa_dict['vanilla']['sem']]
 
-    bar_colors = ['tab:blue', 'tab:orange']
+    # Color scheme: IDRNN (your architecture) = blue, vanilla = orange
+    bar_colors = ['#1f77b4', '#ff7f0e']  # blue, orange
     x_pos = np.arange(len(models))
 
     # Draw bars without error bars first (for cleaner look)
@@ -298,7 +402,7 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
         x_pos,
         means,
         color=bar_colors,
-        alpha=0.7,
+        alpha=0.85,
         width=0.6
     )
 
@@ -338,7 +442,7 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
     """Plot aggregated model likelihoods."""
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    models = ['Q CP', 'Q MAP', 'FQ CP', 'FQ MAP', 'RNNCP', 'RNNID', 'VanillaRNN']
+    models = ['Q CP', 'Q MAP', 'FQ CP', 'FQ MAP', 'RNNCP', 'IDRNN', 'VanillaRNN']
     means = [
         likelihood_summary['Q_common']['mean'],
         likelihood_summary['Q_MAP']['mean'],
@@ -358,12 +462,21 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
         likelihood_summary['RNN_vanilla']['sem']
     ]
 
-    bar_labels = ['common fit', 'individual differences', '_common fit', '_individual differences',
-                  '_common fit', '_individual differences', 'vanilla NN']
-    bar_colors = ['tab:green', 'tab:blue', 'tab:green', 'tab:blue', 'tab:green', 'tab:blue', 'tab:orange']
+    # Color scheme:
+    # Q model = grey, FQ model = green, your architecture (RNNCP/IDRNN) = blue, vanilla = orange
+    # Common fit = faded (lower alpha), Individual differences = full saturation
+    grey_common = '#a0a0a0'      # faded grey for Q common
+    grey_indiv = '#505050'       # darker grey for Q individual
+    green_common = '#90d090'     # faded green for FQ common
+    green_indiv = '#2ca02c'      # full green for FQ individual
+    blue_common = '#a0c4e8'      # faded blue for RNN common
+    blue_indiv = '#1f77b4'       # full blue for IDRNN
+    orange = '#ff7f0e'           # orange for vanilla
 
-    bars = ax.bar(models, means, yerr=sems, capsize=3, color=bar_colors, alpha=0.8,
-                  label=bar_labels, error_kw={'elinewidth': 1, 'capthick': 1})
+    bar_colors = [grey_common, grey_indiv, green_common, green_indiv, blue_common, blue_indiv, orange]
+
+    bars = ax.bar(models, means, yerr=sems, capsize=3, color=bar_colors, alpha=0.9,
+                  error_kw={'elinewidth': 1, 'capthick': 1})
 
     # Add individual dataset points (smaller, less prominent)
     keys = ['Q_common', 'Q_MAP', 'FQ_common', 'FQ_MAP', 'RNN_common', 'RNN_ID', 'RNN_vanilla']
@@ -376,6 +489,25 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
     # Add true model reference line
     true_model_mean = likelihood_summary['True_model']['mean']
     ax.axhline(true_model_mean, linestyle='--', color='black', linewidth=1.5, label='True model')
+
+    # Create custom legend for model types and fit types
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=grey_indiv, label='Q model'),
+        Patch(facecolor=green_indiv, label='FQ model'),
+        Patch(facecolor=blue_indiv, label='IDRNN'),
+        Patch(facecolor=orange, label='Vanilla RNN'),
+        Patch(facecolor='white', edgecolor='black', label='─── True model', linestyle='--'),
+    ]
+    legend1 = ax.legend(handles=legend_elements, title='Model type', loc='lower left')
+    ax.add_artist(legend1)
+
+    # Add second legend for fit type (common vs individual)
+    legend_elements2 = [
+        Patch(facecolor='#c0c0c0', label='Common process'),
+        Patch(facecolor='#606060', label='Individual differences'),
+    ]
+    ax.legend(handles=legend_elements2, title='Fit type', loc='lower right')
 
     # Statistical tests (if enough data)
     try:
@@ -396,14 +528,13 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
             add_sig(ax, 0, 1, ymax + h*2, h, p_q)
             add_sig(ax, 2, 3, ymax + h*2, h, p_fq)
             add_sig(ax, 4, 5, ymax + h*2, h, p_rnn)
-            add_sig(ax, 6, 5, ymax + h*2.3, h, p_rnn_vanilla)
+            add_sig(ax, 5, 6, ymax + h*5, h, p_rnn_vanilla)
     except Exception as e:
         print(f"Warning: Could not compute statistical tests: {e}")
 
     ax.set_ylabel('Mean log likelihood per participant', fontsize=12)
     ax.set_title(f'Model Performance Comparison\n(Aggregated across {N_DATASETS} datasets)',
                  fontsize=14, fontweight='bold')
-    ax.legend(title='Model types', loc='lower left')
     ax.set_ylim(bottom=true_model_mean - 5)
 
     plt.tight_layout()
@@ -415,6 +546,11 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
 def plot_per_dataset_breakdown(all_results, output_dir):
     """Create plots showing per-dataset breakdown of key metrics."""
     dataset_ids = sorted(all_results.keys())
+
+    # Color scheme consistent with main plots
+    blue_indiv = '#1f77b4'       # IDRNN (our architecture, individual differences)
+    blue_common = '#a0c4e8'      # RNNCP (our architecture, common process)
+    orange = '#ff7f0e'           # vanilla RNN
 
     # Plot 1: RSA correlations per dataset
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -428,8 +564,8 @@ def plot_per_dataset_breakdown(all_results, output_dir):
     x = np.arange(len(valid_rsa_datasets))
     width = 0.35
 
-    ax.bar(x - width/2, latent_corrs, width, label='IDRNN', color='tab:blue', alpha=0.8)
-    ax.bar(x + width/2, vanilla_corrs, width, label='Vanilla RNN', color='tab:orange', alpha=0.8)
+    ax.bar(x - width/2, latent_corrs, width, label='IDRNN', color=blue_indiv, alpha=0.85)
+    ax.bar(x + width/2, vanilla_corrs, width, label='Vanilla RNN', color=orange, alpha=0.85)
 
     ax.set_xlabel('Dataset ID', fontsize=12)
     ax.set_ylabel('RSA Correlation', fontsize=12)
@@ -482,9 +618,9 @@ def plot_per_dataset_breakdown(all_results, output_dir):
     x = np.arange(len(valid_ll_datasets))
     width = 0.25
 
-    ax.bar(x - width, rnn_common_lls, width, label='RNN Common Process', color='tab:green', alpha=0.8)
-    ax.bar(x, rnn_id_lls, width, label='IDRNN', color='tab:blue', alpha=0.8)
-    ax.bar(x + width, rnn_vanilla_lls, width, label='Vanilla RNN', color='tab:orange', alpha=0.8)
+    ax.bar(x - width, rnn_common_lls, width, label='RNNCP (common process)', color=blue_common, alpha=0.9)
+    ax.bar(x, rnn_id_lls, width, label='IDRNN (individual diff.)', color=blue_indiv, alpha=0.9)
+    ax.bar(x + width, rnn_vanilla_lls, width, label='Vanilla RNN', color=orange, alpha=0.9)
 
     ax.set_xlabel('Dataset ID', fontsize=12)
     ax.set_ylabel('Mean Log Likelihood', fontsize=12)
@@ -758,7 +894,10 @@ def main():
         f.write(f"Number of datasets: {N_DATASETS}\n")
         f.write(f"Successfully loaded: {successful_datasets}\n")
         f.write(f"Random seeds per dataset: {SEEDS}\n")
-        f.write(f"Epoch window: [{MIN_EPOCH}, {MAX_EPOCH if MAX_EPOCH else 'unlimited'}]\n\n")
+        f.write(f"Epoch window: [{MIN_EPOCH}, {MAX_EPOCH}]\n")
+        f.write(f"Selection criteria:\n")
+        f.write(f"  - Latent models: best_epoch_by_specificity.json\n")
+        f.write(f"  - Vanilla models: {VANILLA_SELECTION_CRITERION}\n\n")
 
         f.write("RSA CORRELATIONS:\n")
         f.write(f"  IDRNN:       {rsa_dict['IDRNN']['mean']:.4f} ± {rsa_dict['IDRNN']['sem']:.4f}\n")

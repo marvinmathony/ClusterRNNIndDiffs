@@ -11,16 +11,31 @@ import json
 import argparse
 import torch
 
+# Epoch window configuration (must match analyze_synthetic_multi_dataset.py)
+DEFAULT_MIN_EPOCH = 1000  # Minimum epoch to consider
+DEFAULT_MAX_EPOCH = 3000  # Maximum epoch to consider (prevents overtraining)
+
 parser = argparse.ArgumentParser(description="Select best epoch by composite score")
 parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True, help="latent or vanilla modeling")
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
+parser.add_argument('--min_epoch', type=int, default=DEFAULT_MIN_EPOCH, help="minimum epoch to consider")
+parser.add_argument('--max_epoch', type=int, default=DEFAULT_MAX_EPOCH, help="maximum epoch to consider")
 args = parser.parse_args()
 
 latent = args.latent
 DATASET_ID = args.dataset_id
+MIN_EPOCH = args.min_epoch
+MAX_EPOCH = args.max_epoch
 
 BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 SEEDS = [12, 50, 76, 100, 142]
+
+print(f"\n{'='*60}")
+print(f"EPOCH SELECTION BY COMPOSITE SCORE")
+print(f"Model: {'IDRNN' if latent else 'Vanilla'}")
+print(f"Dataset: {DATASET_ID}")
+print(f"Epoch window: [{MIN_EPOCH}, {MAX_EPOCH}]")
+print(f"{'='*60}\n")
 
 def list_epochs_for_seed(seed):
     rsa_dir = os.path.join(BASE_DIR, f"seed_{seed}", "rsa")
@@ -95,10 +110,13 @@ def compute_seed_centrality(seed, epoch, all_seeds):
 epochs_per_seed = {seed: set(list_epochs_for_seed(seed)) for seed in SEEDS}
 common_epochs = sorted(set.intersection(*epochs_per_seed.values()))
 
-if not common_epochs:
-    raise RuntimeError("No common epochs across seeds – check your runs.")
+# Apply epoch window filter
+common_epochs = [e for e in common_epochs if e >= MIN_EPOCH and e <= MAX_EPOCH]
 
-print(f"Found {len(common_epochs)} common epochs")
+if not common_epochs:
+    raise RuntimeError(f"No common epochs across seeds in window [{MIN_EPOCH}, {MAX_EPOCH}] – check your runs.")
+
+print(f"Found {len(common_epochs)} common epochs in window [{MIN_EPOCH}, {MAX_EPOCH}]")
 
 # Compute metrics for each epoch
 scores_per_epoch = {}
@@ -207,6 +225,8 @@ with open(out_path, "w") as f:
                 'loss': float(seed_scores[seed]['loss'])
             } for seed in SEEDS
         },
+        "min_epoch": MIN_EPOCH,
+        "max_epoch": MAX_EPOCH,
         "seeds": SEEDS
     }, f, indent=2)
 

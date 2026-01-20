@@ -51,33 +51,33 @@ LMBD=0.05
 Z_DIM=3
 SEEDS=(12 50 76 100 142)
 
-# # Step 1: Generate data
-# echo "Generating dataset $DATASET_ID..."
-# python data_generation.py --dataset_id $DATASET_ID
+# Step 1: Generate data
+echo "Generating dataset $DATASET_ID..."
+python data_generation.py --dataset_id $DATASET_ID
 
-# # Step 2: Train latent models
-# echo "Training latent models for dataset $DATASET_ID..."
-# for seed in "${SEEDS[@]}"; do
-#     echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Training latent model with seed $seed..."
-#     python run_Q_model.py \
-#         --seed $seed \
-#         --latent True \
-#         --dataset_id $DATASET_ID \
-#         --lmbd $LMBD \
-#         --z $Z_DIM
-#     echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Completed latent model with seed $seed"
-# done
+# Step 2: Train latent models
+echo "Training latent models for dataset $DATASET_ID..."
+for seed in "${SEEDS[@]}"; do
+    echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Training latent model with seed $seed..."
+    python run_Q_model.py \
+        --seed $seed \
+        --latent True \
+        --dataset_id $DATASET_ID \
+        --lmbd $LMBD \
+        --z $Z_DIM
+    echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Completed latent model with seed $seed"
+done
 
-# # Step 3: Train vanilla models
-# echo "Training vanilla models for dataset $DATASET_ID..."
-# for seed in "${SEEDS[@]}"; do
-#     echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Training vanilla model with seed $seed..."
-#     python run_Q_model.py \
-#         --seed $seed \
-#         --latent False \
-#         --dataset_id $DATASET_ID
-#     echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Completed vanilla model with seed $seed"
-# done
+# Step 3: Train vanilla models
+echo "Training vanilla models for dataset $DATASET_ID..."
+for seed in "${SEEDS[@]}"; do
+    echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Training vanilla model with seed $seed..."
+    python run_Q_model.py \
+        --seed $seed \
+        --latent False \
+        --dataset_id $DATASET_ID
+    echo "  [$(date '+%Y-%m-%d %H:%M:%S')] Completed vanilla model with seed $seed"
+done
 
 # Step 4: Select best epochs
 # Use composite score (RSA reliability + loss + stability) for both model types

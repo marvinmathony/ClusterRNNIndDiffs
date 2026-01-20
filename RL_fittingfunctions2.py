@@ -979,12 +979,15 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
         if fit_MAP:
 
             ### fitting part
-            #should work
-            m, v, eta_vec, var_vec, m_history, v_history = run_empirical_bayes(df_train, model_config, common_params, n_iter=50)
+            # Run EM: now returns shared_params which are the non-alpha parameters
+            # fit jointly with the individual alpha estimates
+            m, v, eta_vec, var_vec, m_history, v_history, shared_params = run_empirical_bayes(df_train, model_config, common_params, n_iter=50)
             print(f"eta vector: {eta_vec}")
             print(f"population mean history: {m}")
+            print(f"EM-fitted shared params: {shared_params}")
 
-            params_per_session_MAP = infer_params_for_test_EM(df_test, m, v, common_params, model_config)
+            # Use the EM-fitted shared_params (not common_params) as the base for test inference
+            params_per_session_MAP = infer_params_for_test_EM(df_test, m, v, shared_params, model_config)
             #print(f"after fitting MAP, individual params for session 1 are {params_per_session_MAP[1]}")
             #sanity checks
             test_session = df_test['session'].unique()[0]
@@ -1003,8 +1006,10 @@ def fit_all_models(model_configs, df_train, df_test, n_iter, fit_common=True, fi
 
             print(f"\nSession {test_session}:")
             print(f"  common fit neg LL = {neg_ll_common}")
-            print(f"  EM α only  neg LL = {neg_ll_EM}")
+            print(f"  EM (indiv alpha + EM-fitted shared params) neg LL = {neg_ll_EM}")
             print(f"  difference        = {neg_ll_common - neg_ll_EM}")
+            print(f"  common_params: {common_params}")
+            print(f"  EM shared_params: {shared_params}")
 
             print("Type of params_per_session_MAP:", type(params_per_session_MAP))
             first_key = list(params_per_session_MAP.keys())[0]
@@ -1190,8 +1195,17 @@ def estimate_h_i_and_Sigma_i(m, v, base_params, sessions, choices, rewards, cont
         lambda eta: neg_log_posterior(eta, m, v, base_params, sessions, choices, rewards, context, model_config),
         eta
     )
-    var_theta = -1.0 / H
-    
+    # H should be positive for a minimum of neg_log_posterior
+    # var_theta = 1/H (inverse of Hessian at minimum)
+    # Ensure variance is positive and bounded
+    if H > 1e-6:
+        var_theta = 1.0 / H
+    else:
+        # If Hessian is not positive definite, use prior variance as fallback
+        var_theta = v
+    # Clip to reasonable range
+    var_theta = float(np.clip(var_theta, 1e-4, 10.0))
+
     return eta, var_theta
 
 # EM updates
@@ -1236,9 +1250,15 @@ def run_empirical_bayes(df, model_config, base_params, n_iter=20):
     m_history = []
     v_history = []
     session_results = []
+
+    # Initialize shared_params with base_params (will be updated in M-step)
+    shared_params = np.array(base_params, copy=True)
+
     for i in range(n_iter):
+        # ========== E-STEP: Estimate individual alpha (eta) for each participant ==========
         eta_list = []
         var_list = []
+        session_list = []
         for session, group in df.groupby('session'):
             count = 0
             session_indices = group.index
@@ -1246,23 +1266,145 @@ def run_empirical_bayes(df, model_config, base_params, n_iter=20):
             choices = group['c'].values
             rewards = group['r'].values
             context = group['context'].values if 'context' in group.columns else None
-            eta_i, var_eta_i = estimate_h_i_and_Sigma_i(m, v, base_params, sessions, choices, rewards, context, model_config, count)
+            eta_i, var_eta_i = estimate_h_i_and_Sigma_i(m, v, shared_params, sessions, choices, rewards, context, model_config, count)
             count += 1
             eta_list.append(eta_i) # remember that you're saving the unbounded parameter here
             var_list.append(var_eta_i)
+            session_list.append(session)
             if i == n_iter:
                 session_results.append({
                     'session': session,
-                    'params': base_params,
+                    'params': shared_params,
 
                     })
         eta_vec = np.array(eta_list)
         var_vec = np.array(var_list)
+
+        # Update group prior for alpha
         m, v = update_group_prior1D(eta_vec, var_vec)
         m_history.append(m)
         v_history.append(v)
-    
-    return m, v, eta_vec, var_vec, np.array(m_history), np.array(v_history)
+
+        # ========== M-STEP: Re-fit shared parameters (non-alpha) given current alpha estimates ==========
+        # Convert eta to alpha for each participant
+        alpha_per_session = {session: sigmoid(eta) for session, eta in zip(session_list, eta_vec)}
+
+        # Optimize shared parameters (all except alpha) to maximize total likelihood
+        shared_params = optimize_shared_params(df, model_config, shared_params, alpha_per_session)
+
+        if i % 10 == 0:
+            print(f"EM iteration {i}: m={m:.4f}, v={v:.4f}")
+
+    return m, v, eta_vec, var_vec, np.array(m_history), np.array(v_history), shared_params
+
+
+def optimize_shared_params(df, model_config, current_params, alpha_per_session):
+    """
+    M-step: Optimize the shared (non-alpha) parameters while keeping
+    individual alphas fixed at their E-step posterior means.
+
+    Parameters:
+    - df: DataFrame with all sessions
+    - model_config: Model configuration dict
+    - current_params: Current parameter vector
+    - alpha_per_session: Dict mapping session -> alpha value from E-step
+
+    Returns:
+    - Updated shared parameter vector
+    """
+    idxs = get_param_indices(model_config)
+    alpha_idx = idxs.get("alpha")
+
+    if alpha_idx is None:
+        raise ValueError("optimize_shared_params only supports symmetric alpha models")
+
+    # Build bounds for non-alpha parameters
+    asymmetric_alpha = model_config.get("asymmetric_alpha", False)
+    forgetting_type = model_config.get("forgetting_type", "none")
+    choice_trace = model_config.get("choice_trace", False)
+    init_Q_free = model_config.get("init_Q_free", False)
+
+    # Build list of (index, lower_bound, upper_bound) for non-alpha params
+    non_alpha_indices = []
+    bounds_non_alpha = []
+
+    idx = 0
+    if init_Q_free:
+        non_alpha_indices.extend([idx, idx+1])
+        bounds_non_alpha.extend([(0, 1), (0, 1)])
+        idx += 2
+
+    # Skip alpha index (we don't optimize it in M-step)
+    if asymmetric_alpha:
+        idx += 2  # Skip alphaP, alphaN
+    else:
+        idx += 1  # Skip alpha
+
+    if forgetting_type == "free":
+        non_alpha_indices.append(idx)
+        bounds_non_alpha.append((0, 1))
+        idx += 1
+
+    # Beta
+    non_alpha_indices.append(idx)
+    bounds_non_alpha.append((0, 20))
+    idx += 1
+
+    if choice_trace:
+        # phi
+        non_alpha_indices.append(idx)
+        bounds_non_alpha.append((-10, 10))
+        idx += 1
+        # tau
+        non_alpha_indices.append(idx)
+        bounds_non_alpha.append((0, 1))
+        idx += 1
+
+    # If no non-alpha parameters to optimize, return current params
+    if len(non_alpha_indices) == 0:
+        return current_params
+
+    # Extract current values for non-alpha params
+    x0 = [current_params[i] for i in non_alpha_indices]
+
+    def total_negll(non_alpha_values):
+        """Compute total negative log-likelihood with fixed individual alphas."""
+        # Build full param vector template
+        param_template = np.array(current_params, copy=True)
+        for i, val in zip(non_alpha_indices, non_alpha_values):
+            param_template[i] = val
+
+        total_ll = 0.0
+        for session, group in df.groupby('session'):
+            sessions = np.full_like(group['c'].values, session)
+            choices = group['c'].values
+            rewards = group['r'].values
+            context = group['context'].values if 'context' in group.columns else None
+
+            # Set this session's alpha
+            param = np.array(param_template, copy=True)
+            param[idxs["alpha"]] = alpha_per_session[session]
+
+            neg_ll, _ = qlearning_full(param, sessions, choices, rewards, context, model_config)
+            total_ll += neg_ll
+
+        return total_ll
+
+    # Optimize
+    result = minimize(
+        fun=total_negll,
+        x0=x0,
+        method='L-BFGS-B',
+        bounds=bounds_non_alpha,
+        options=dict(maxiter=100, ftol=1e-5)
+    )
+
+    # Build updated param vector
+    updated_params = np.array(current_params, copy=True)
+    for i, val in zip(non_alpha_indices, result.x):
+        updated_params[i] = val
+
+    return updated_params
 
 def infer_params_for_test_EM(df_test, m, v, base_param, model_config):
     """
