@@ -363,6 +363,8 @@ def main():
                         help="sample every N epochs (1 = all epochs)")
     parser.add_argument('--analyze_correlation', action='store_true',
                         help="Analyze correlation with ground truth RSA")
+    parser.add_argument('--dgp', type=str, default=None,
+                        help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -371,9 +373,15 @@ def main():
     is_latent = args.latent
     DATASET_ID = args.dataset_id
     MIN_EPOCH = args.min_epoch
+    DGP = args.dgp
 
-    BASE_DIR = f"runs_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_dataset{DATASET_ID}"
-    DATA_DIR = f"data_dataset{DATASET_ID}"
+    # Build directory names with optional DGP prefix
+    if DGP:
+        BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+        DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+    else:
+        BASE_DIR = f"runs_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_dataset{DATASET_ID}"
+        DATA_DIR = f"data_dataset{DATASET_ID}"
     SEEDS = [12, 50, 76, 100, 142]
 
     model_type = "IDRNN" if is_latent else "Vanilla"

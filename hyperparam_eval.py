@@ -12,14 +12,17 @@ import glob
 from collections import defaultdict
 
 
-def load_rsa_correlations(run_dir, dataset_id=0):
+def load_rsa_correlations(run_dir, dataset_id=0, dgp=None):
     """Load RSA correlations from saved .npy files in rsa/ directory."""
     rsa_dir = os.path.join(run_dir, "rsa")
     if not os.path.exists(rsa_dir):
         return None, None
 
     # Load ground truth RSA for comparison
-    data_dir = f"data_dataset{dataset_id}"
+    if dgp:
+        data_dir = f"data_{dgp}_dataset{dataset_id}"
+    else:
+        data_dir = f"data_dataset{dataset_id}"
     param_file = os.path.join(data_dir, "true_test_parameter_values.csv")
     if not os.path.exists(param_file):
         print(f"Warning: Ground truth file not found: {param_file}")
@@ -71,12 +74,13 @@ def load_loss_trajectory(run_dir):
     return losses
 
 
-def evaluate_hyperparam_combo(lmbd, z_dim, dataset_id, seeds):
+def evaluate_hyperparam_combo(lmbd, z_dim, dataset_id, seeds, dgp=None):
     """Evaluate a single hyperparameter combination across seeds."""
     results = {
         "lmbd": lmbd,
         "z_dim": z_dim,
         "dataset_id": dataset_id,
+        "dgp": dgp,
         "seeds": seeds,
         "per_seed": {}
     }
@@ -87,7 +91,10 @@ def evaluate_hyperparam_combo(lmbd, z_dim, dataset_id, seeds):
     for seed in seeds:
         # Check both possible run directory patterns
         run_dir_hp = f"hp_search_runs/lmbd_{lmbd}_z_{z_dim}/seed_{seed}"
-        run_dir_std = f"runs_dataset{dataset_id}/seed_{seed}"
+        if dgp:
+            run_dir_std = f"runs_{dgp}_dataset{dataset_id}/seed_{seed}"
+        else:
+            run_dir_std = f"runs_dataset{dataset_id}/seed_{seed}"
 
         run_dir = run_dir_hp if os.path.exists(run_dir_hp) else run_dir_std
 
@@ -95,7 +102,7 @@ def evaluate_hyperparam_combo(lmbd, z_dim, dataset_id, seeds):
             print(f"Warning: Run directory not found: {run_dir}")
             continue
 
-        correlations, best_info = load_rsa_correlations(run_dir, dataset_id)
+        correlations, best_info = load_rsa_correlations(run_dir, dataset_id, dgp=dgp)
         losses = load_loss_trajectory(run_dir)
 
         if correlations is None:
@@ -148,11 +155,13 @@ def main():
     parser.add_argument("--dataset_id", type=int, default=0, help="Dataset ID")
     parser.add_argument("--seeds", type=str, default="12 50", help="Space-separated seed list")
     parser.add_argument("--output", type=str, default=None, help="Output JSON file")
+    parser.add_argument("--dgp", type=str, default=None,
+                        help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
     args = parser.parse_args()
 
     seeds = [int(s) for s in args.seeds.split()]
 
-    results = evaluate_hyperparam_combo(args.lmbd, args.z, args.dataset_id, seeds)
+    results = evaluate_hyperparam_combo(args.lmbd, args.z, args.dataset_id, seeds, dgp=args.dgp)
 
     # Print summary
     print("\n" + "="*60)

@@ -108,6 +108,8 @@ def main():
                         help="minimum epoch to consider")
     parser.add_argument('--max_epoch', type=int, default=DEFAULT_MAX_EPOCH,
                         help="maximum epoch to consider")
+    parser.add_argument('--dgp', type=str, default=None,
+                        help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -117,9 +119,15 @@ def main():
     DATASET_ID = args.dataset_id
     MIN_EPOCH = args.min_epoch
     MAX_EPOCH = args.max_epoch
+    DGP = args.dgp
 
-    BASE_DIR = f"runs_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_dataset{DATASET_ID}"
-    DATA_DIR = f"data_dataset{DATASET_ID}"
+    # Build directory names with optional DGP prefix
+    if DGP:
+        BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+        DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+    else:
+        BASE_DIR = f"runs_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_dataset{DATASET_ID}"
+        DATA_DIR = f"data_dataset{DATASET_ID}"
     SEEDS = [12, 50, 76, 100, 142]
 
     model_type = "IDRNN" if is_latent else "Vanilla"

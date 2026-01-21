@@ -14,7 +14,7 @@
 #SBATCH --mem=16G
 #SBATCH --gres=gpu:1
 #SBATCH --nodes=1
-#SBATCH --time=01:00:00
+#SBATCH --time=12:00:00
 #SBATCH --nice=10000
 
 cd /ictstr01/home/hcai/marvin.mathony/RNNsandUncertainty

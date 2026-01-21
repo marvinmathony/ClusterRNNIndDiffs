@@ -623,7 +623,7 @@ def generate_parameter_lists(true_model, ind_diff_type, Delta_alpha=None, nSessi
     
     Parameters:
     - true_model (str): The type of true model (e.g., 'Q', 'FQ', etc.).
-    - ind_diff_type (str): Type of individual difference ('continuous_all', 'continuous_alpha_only', 'None', 'discrete_alpha_only', 'full_range').
+    - ind_diff_type (str): Type of individual difference ('continuous_all', 'continuous_alpha_only', 'None', 'discrete_alpha_only', 'full_range', 'uniform').
     - Delta_alpha (float or None): Used only when ind_diff_type is 'discrete_alpha_only'.
     - nSession (int): Number of sessions (default: 100).
     

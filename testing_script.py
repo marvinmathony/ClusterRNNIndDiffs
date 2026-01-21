@@ -15,6 +15,8 @@ parser = argparse.ArgumentParser(description="Test trained models")
 parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True, help="latent or vanilla modeling")
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
 parser.add_argument('--model_fitting', type=lambda x: x.lower() == 'true', default=False, help="whether to fit cognitive models")
+parser.add_argument('--dgp', type=str, default=None,
+                    help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
 args = parser.parse_args()
 
 ############################
@@ -23,10 +25,15 @@ args = parser.parse_args()
 latent = args.latent
 DATASET_ID = args.dataset_id
 model_fitting = args.model_fitting
+DGP = args.dgp
 palminteri = False
 sloutsky = False
 
-DATA_DIR = f"data_dataset{DATASET_ID}"
+# Build directory names with optional DGP prefix
+if DGP:
+    DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+else:
+    DATA_DIR = f"data_dataset{DATASET_ID}"
 n_fit_iter = 5
 vanilla_nametag = "vanilla"
 latent_nametag = "latentmodel"
@@ -47,7 +54,11 @@ c_test = torch.from_numpy(c_test).float().to(device)
 c_train = torch.from_numpy(c_train).float().to(device)
 
 
-BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
+# Build runs directory with optional DGP prefix
+if DGP:
+    BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+else:
+    BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 
 # Load best epoch
 if latent:

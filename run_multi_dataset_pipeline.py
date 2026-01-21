@@ -45,18 +45,24 @@ def main():
     parser.add_argument('--skip_selection', action='store_true', help="Skip epoch selection step")
     parser.add_argument('--skip_testing', action='store_true', help="Skip testing step")
     parser.add_argument('--only_analysis', action='store_true', help="Only run the aggregated analysis")
+    parser.add_argument('--dgp', type=str, default=None,
+                        help="Data generating process type (e.g., 'bimodal', 'uniform'). Propagated to all sub-scripts.")
     args = parser.parse_args()
 
     n_datasets = args.n_datasets
+    dgp = args.dgp
+    dgp_args = ["--dgp", dgp] if dgp else []
 
     print(f"\n🚀 Starting multi-dataset pipeline with {n_datasets} datasets")
     print(f"Random seeds: {SEEDS}")
 
+    dgp_info = f" (DGP: {dgp})" if dgp else ""
+
     if args.only_analysis:
         print("\n📊 Running only aggregated analysis...")
         run_command(
-            ["python", "analyze_synthetic_multi_dataset.py"],
-            "Aggregated analysis across datasets"
+            ["python", "analyze_synthetic_multi_dataset.py"] + dgp_args,
+            f"Aggregated analysis across datasets{dgp_info}"
         )
         print("\n🎉 Analysis complete!")
         return
@@ -64,23 +70,23 @@ def main():
     # Step 1: Generate datasets
     if not args.skip_data_generation:
         print("\n" + "="*80)
-        print("STEP 1: DATA GENERATION")
+        print(f"STEP 1: DATA GENERATION{dgp_info}")
         print("="*80)
 
         for dataset_id in range(n_datasets):
             run_command(
-                ["python", "data_generation.py", "--dataset_id", str(dataset_id)],
-                f"Data generation for dataset {dataset_id}"
+                ["python", "data_generation.py", "--dataset_id", str(dataset_id)] + dgp_args,
+                f"Data generation for dataset {dataset_id}{dgp_info}"
             )
 
     # Step 2: Train models across seeds
     if not args.skip_training:
         print("\n" + "="*80)
-        print("STEP 2: MODEL TRAINING")
+        print(f"STEP 2: MODEL TRAINING{dgp_info}")
         print("="*80)
 
         for dataset_id in range(n_datasets):
-            print(f"\n--- Training on Dataset {dataset_id} ---")
+            print(f"\n--- Training on Dataset {dataset_id}{dgp_info} ---")
 
             # Train latent models
             for seed in SEEDS:
@@ -90,8 +96,8 @@ def main():
                      "--latent", "True",
                      "--dataset_id", str(dataset_id),
                      "--lmbd", str(args.lmbd),
-                     "--z", str(args.z)],
-                    f"Training latent model on dataset {dataset_id} with seed {seed} (lmbd={args.lmbd}, z={args.z})"
+                     "--z", str(args.z)] + dgp_args,
+                    f"Training latent model on dataset {dataset_id} with seed {seed} (lmbd={args.lmbd}, z={args.z}){dgp_info}"
                 )
 
             # Train vanilla models
@@ -100,14 +106,14 @@ def main():
                     ["python", "run_Q_model.py",
                      "--seed", str(seed),
                      "--latent", "False",
-                     "--dataset_id", str(dataset_id)],
-                    f"Training vanilla model on dataset {dataset_id} with seed {seed}"
+                     "--dataset_id", str(dataset_id)] + dgp_args,
+                    f"Training vanilla model on dataset {dataset_id} with seed {seed}{dgp_info}"
                 )
 
     # Step 3: Select best epochs
     if not args.skip_selection:
         print("\n" + "="*80)
-        print("STEP 3: BEST EPOCH SELECTION")
+        print(f"STEP 3: BEST EPOCH SELECTION{dgp_info}")
         print("="*80)
 
         for dataset_id in range(n_datasets):
@@ -115,22 +121,22 @@ def main():
             run_command(
                 ["python", "select_best_epoch_by_rsa.py",
                  "--latent", "True",
-                 "--dataset_id", str(dataset_id)],
-                f"Selecting best epoch for latent models on dataset {dataset_id}"
+                 "--dataset_id", str(dataset_id)] + dgp_args,
+                f"Selecting best epoch for latent models on dataset {dataset_id}{dgp_info}"
             )
 
             # Select for vanilla models
             run_command(
                 ["python", "select_best_epoch_by_rsa.py",
                  "--latent", "False",
-                 "--dataset_id", str(dataset_id)],
-                f"Selecting best epoch for vanilla models on dataset {dataset_id}"
+                 "--dataset_id", str(dataset_id)] + dgp_args,
+                f"Selecting best epoch for vanilla models on dataset {dataset_id}{dgp_info}"
             )
 
     # Step 4: Run testing
     if not args.skip_testing:
         print("\n" + "="*80)
-        print("STEP 4: MODEL TESTING")
+        print(f"STEP 4: MODEL TESTING{dgp_info}")
         print("="*80)
 
         for dataset_id in range(n_datasets):
@@ -139,8 +145,8 @@ def main():
                 ["python", "testing_script.py",
                  "--latent", "True",
                  "--dataset_id", str(dataset_id),
-                 "--model_fitting", "True"],
-                f"Testing latent model on dataset {dataset_id}"
+                 "--model_fitting", "True"] + dgp_args,
+                f"Testing latent model on dataset {dataset_id}{dgp_info}"
             )
 
             # Test vanilla models
@@ -148,30 +154,33 @@ def main():
                 ["python", "testing_script.py",
                  "--latent", "False",
                  "--dataset_id", str(dataset_id),
-                 "--model_fitting", "True"],
-                f"Testing vanilla model on dataset {dataset_id}"
+                 "--model_fitting", "True"] + dgp_args,
+                f"Testing vanilla model on dataset {dataset_id}{dgp_info}"
             )
 
     # Step 5: Aggregate and plot
     print("\n" + "="*80)
-    print("STEP 5: AGGREGATED ANALYSIS")
+    print(f"STEP 5: AGGREGATED ANALYSIS{dgp_info}")
     print("="*80)
 
     run_command(
-        ["python", "analyze_synthetic_multi_dataset.py"],
-        "Aggregated analysis across all datasets"
+        ["python", "analyze_synthetic_multi_dataset.py"] + dgp_args,
+        f"Aggregated analysis across all datasets{dgp_info}"
     )
 
     print("\n" + "="*80)
     print("🎉 PIPELINE COMPLETE!")
     print("="*80)
-    print(f"\nProcessed {n_datasets} datasets with {len(SEEDS)} seeds each")
+    print(f"\nProcessed {n_datasets} datasets with {len(SEEDS)} seeds each{dgp_info}")
     print("Results are saved in:")
+    # Build directory names for output display
+    dgp_prefix = f"{dgp}_" if dgp else ""
     for dataset_id in range(n_datasets):
-        print(f"  - data_dataset{dataset_id}/")
-        print(f"  - runs_dataset{dataset_id}/")
-        print(f"  - runs_vanilla_dataset{dataset_id}/")
-    print("\nAggregated plots are in: plots/multi_dataset/")
+        print(f"  - data_{dgp_prefix}dataset{dataset_id}/")
+        print(f"  - runs_{dgp_prefix}dataset{dataset_id}/")
+        print(f"  - runs_vanilla_{dgp_prefix}dataset{dataset_id}/")
+    plot_suffix = f"_{dgp}" if dgp else ""
+    print(f"\nAggregated plots are in: plots/multi_dataset{plot_suffix}/")
 
 if __name__ == "__main__":
     main()

@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import plot_functions as plf
 import os
 import json
+import argparse
 from scipy.stats import ttest_rel, sem
 from modelsandtraining import vectorize_rsa
 import torch
@@ -21,6 +22,13 @@ from sklearn.decomposition import PCA
 # Configuration
 N_DATASETS = 5
 SEEDS = [12, 50, 76, 100, 142]
+
+# Parse arguments for DGP support
+parser = argparse.ArgumentParser(description="Aggregated analysis for multi-dataset experiments")
+parser.add_argument('--dgp', type=str, default=None,
+                    help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
+args = parser.parse_args()
+DGP = args.dgp
 
 # Vanilla model selection criterion: "composite", "rsa", or "loss"
 # - "composite": uses best_epoch_by_composite.json (RSA reliability + loss + stability)
@@ -151,11 +159,17 @@ def find_best_epoch_by_loss(base_dir, seeds, min_epoch=None, max_epoch=None):
     return best_seed, best_epoch, best_loss
 
 
-def load_dataset_results(dataset_id):
+def load_dataset_results(dataset_id, dgp=None):
     """Load all results for a given dataset."""
-    data_dir = f"data_dataset{dataset_id}"
-    runs_dir = f"runs_dataset{dataset_id}"
-    runs_vanilla_dir = f"runs_vanilla_dataset{dataset_id}"
+    # Build directory names with optional DGP prefix
+    if dgp:
+        data_dir = f"data_{dgp}_dataset{dataset_id}"
+        runs_dir = f"runs_{dgp}_dataset{dataset_id}"
+        runs_vanilla_dir = f"runs_vanilla_{dgp}_dataset{dataset_id}"
+    else:
+        data_dir = f"data_dataset{dataset_id}"
+        runs_dir = f"runs_dataset{dataset_id}"
+        runs_vanilla_dir = f"runs_vanilla_dataset{dataset_id}"
 
     results = {}
 
@@ -394,7 +408,7 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
     sems = [rsa_dict['IDRNN']['sem'], rsa_dict['vanilla']['sem']]
 
     # Color scheme: IDRNN (your architecture) = blue, vanilla = orange
-    bar_colors = ['#1f77b4', '#ff7f0e']  # blue, orange
+    bar_colors = ['#2a82c2', '#e1861f']  # blue, orange
     x_pos = np.arange(len(models))
 
     # Draw bars without error bars first (for cleaner look)
@@ -425,15 +439,19 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
     add_sig(ax, 0, 1, ymax + h, h, p_value)
 
     ax.set_ylabel('Correlation with ground truth', fontsize=12)
-    ax.set_title(f'RSA: Model Latent Geometry vs Ground Truth\n(Aggregated across {N_DATASETS} datasets)',
-                 fontsize=14, fontweight='bold')
+    # ax.set_title(f'RSA: Model Latent Geometry vs Ground Truth\n(Aggregated across {N_DATASETS} datasets)',
+    #              fontsize=14, fontweight='bold')
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(models)
+    ax.set_xticklabels(['RNN ID', 'Vanilla RNN'])
     ax.set_ylim(bottom=0)
     ax.legend(loc='lower right')
 
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/aggregated_rsa_correlation.png", dpi=300, bbox_inches='tight')
+    # Remove top and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    #plt.tight_layout()
+    plt.savefig(f"{output_dir}/aggregated_rsa_correlation.png", dpi=300)#, bbox_inches='tight')
     plt.close()
 
     print(f"✅ Saved aggregated RSA plot to {output_dir}/aggregated_rsa_correlation.png")
@@ -442,7 +460,7 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
     """Plot aggregated model likelihoods."""
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    models = ['Q CP', 'Q MAP', 'FQ CP', 'FQ MAP', 'RNNCP', 'IDRNN', 'VanillaRNN']
+    models = ['Q CP', 'Q MAP', 'FQ CP', 'FQ MAP', 'RNN CP', 'RNN ID', 'Vanilla RNN']
     means = [
         likelihood_summary['Q_common']['mean'],
         likelihood_summary['Q_MAP']['mean'],
@@ -465,13 +483,13 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
     # Color scheme:
     # Q model = grey, FQ model = green, your architecture (RNNCP/IDRNN) = blue, vanilla = orange
     # Common fit = faded (lower alpha), Individual differences = full saturation
-    grey_common = '#a0a0a0'      # faded grey for Q common
-    grey_indiv = '#505050'       # darker grey for Q individual
-    green_common = '#90d090'     # faded green for FQ common
-    green_indiv = '#2ca02c'      # full green for FQ individual
+    grey_common = "#a19f9f"      # faded grey for Q common
+    grey_indiv = "#545454"       # darker grey for Q individual
+    green_common = "#93cd90ac"     # faded green for FQ common
+    green_indiv = "#3ba83b"      # full green for FQ individual
     blue_common = '#a0c4e8'      # faded blue for RNN common
-    blue_indiv = '#1f77b4'       # full blue for IDRNN
-    orange = '#ff7f0e'           # orange for vanilla
+    blue_indiv = "#2a82c2"       # full blue for IDRNN
+    orange = "#e1861f"           # orange for vanilla
 
     bar_colors = [grey_common, grey_indiv, green_common, green_indiv, blue_common, blue_indiv, orange]
 
@@ -495,19 +513,19 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
     legend_elements = [
         Patch(facecolor=grey_indiv, label='Q model'),
         Patch(facecolor=green_indiv, label='FQ model'),
-        Patch(facecolor=blue_indiv, label='IDRNN'),
+        Patch(facecolor=blue_indiv, label='ID RNN'),
         Patch(facecolor=orange, label='Vanilla RNN'),
         Patch(facecolor='white', edgecolor='black', label='─── True model', linestyle='--'),
     ]
-    legend1 = ax.legend(handles=legend_elements, title='Model type', loc='lower left')
+    legend1 = ax.legend(handles=legend_elements, title='Model type', loc='upper left', ncol=len(legend_elements), frameon=False)
     ax.add_artist(legend1)
 
     # Add second legend for fit type (common vs individual)
     legend_elements2 = [
-        Patch(facecolor='#c0c0c0', label='Common process'),
-        Patch(facecolor='#606060', label='Individual differences'),
+        Patch(facecolor='#c0c0c0', label='Common process (CP)'),
+        Patch(facecolor='#606060', label='Individual differences (ID)'),
     ]
-    ax.legend(handles=legend_elements2, title='Fit type', loc='lower right')
+    ax.legend(handles=legend_elements2, title='Fit type', loc='upper right', frameon=False)
 
     # Statistical tests (if enough data)
     try:
@@ -532,13 +550,15 @@ def plot_likelihoods_aggregated(likelihood_summary, output_dir):
     except Exception as e:
         print(f"Warning: Could not compute statistical tests: {e}")
 
-    ax.set_ylabel('Mean log likelihood per participant', fontsize=12)
-    ax.set_title(f'Model Performance Comparison\n(Aggregated across {N_DATASETS} datasets)',
-                 fontsize=14, fontweight='bold')
-    ax.set_ylim(bottom=true_model_mean - 5)
+    ax.set_ylabel('Mean negative log likelihood per participant', fontsize=12)
+    ax.set_ylim(bottom=true_model_mean - 2)
 
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/aggregated_model_likelihoods.png", dpi=300, bbox_inches='tight')
+    # Remove top and right spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    #plt.tight_layout()
+    plt.savefig(f"{output_dir}/aggregated_model_likelihoods.png", dpi=300)#, bbox_inches='tight')
     plt.close()
 
     print(f"✅ Saved aggregated likelihood plot to {output_dir}/aggregated_model_likelihoods.png")
@@ -847,16 +867,21 @@ def main():
     print("MULTI-DATASET AGGREGATED ANALYSIS")
     print("="*80)
 
-    # Create output directory
-    output_dir = "plots/multi_dataset"
+    # Create output directory with optional DGP suffix
+    if DGP:
+        output_dir = f"plots/multi_dataset_{DGP}"
+    else:
+        output_dir = "plots/multi_dataset"
     os.makedirs(output_dir, exist_ok=True)
 
+    dgp_info = f" (DGP: {DGP})" if DGP else ""
+
     # Load all dataset results
-    print(f"\nLoading results from {N_DATASETS} datasets...")
+    print(f"\nLoading results from {N_DATASETS} datasets{dgp_info}...")
     all_results = {}
     for dataset_id in range(N_DATASETS):
-        print(f"  Loading dataset {dataset_id}...")
-        results = load_dataset_results(dataset_id)
+        print(f"  Loading dataset {dataset_id}{dgp_info}...")
+        results = load_dataset_results(dataset_id, dgp=DGP)
         all_results[dataset_id] = results
 
     successful_datasets = sum(1 for r in all_results.values() if r is not None)
@@ -891,6 +916,7 @@ def main():
     with open(summary_path, "w") as f:
         f.write("MULTI-DATASET AGGREGATED RESULTS\n")
         f.write("="*80 + "\n\n")
+        f.write(f"Data generating process (DGP): {DGP if DGP else 'default (discrete_alpha_only)'}\n")
         f.write(f"Number of datasets: {N_DATASETS}\n")
         f.write(f"Successfully loaded: {successful_datasets}\n")
         f.write(f"Random seeds per dataset: {SEEDS}\n")

@@ -20,14 +20,21 @@ parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True
 parser.add_argument('--dataset_id', type=int, default=0, help="dataset ID for multi-dataset experiments")
 parser.add_argument('--min_epoch', type=int, default=DEFAULT_MIN_EPOCH, help="minimum epoch to consider")
 parser.add_argument('--max_epoch', type=int, default=DEFAULT_MAX_EPOCH, help="maximum epoch to consider")
+parser.add_argument('--dgp', type=str, default=None,
+                    help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
 args = parser.parse_args()
 
 latent = args.latent
 DATASET_ID = args.dataset_id
 MIN_EPOCH = args.min_epoch
 MAX_EPOCH = args.max_epoch
+DGP = args.dgp
 
-BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
+# Build directory names with optional DGP prefix
+if DGP:
+    BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+else:
+    BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
 SEEDS = [12, 50, 76, 100, 142]
 
 print(f"\n{'='*60}")

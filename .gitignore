@@ -30,7 +30,21 @@ hp_search_runs/
 runs_dataset99/
 data_dataset99/
 hp_search_results/
-
+data_discrete_alpha_only_dataset0/
+data_discrete_alpha_only_dataset1/
+data_discrete_alpha_only_dataset2/
+data_discrete_alpha_only_dataset3/
+data_discrete_alpha_only_dataset4/
+plots_discrete_alpha_only_dataset0/
+plots_discrete_alpha_only_dataset1/
+plots_discrete_alpha_only_dataset2/
+plots_discrete_alpha_only_dataset3/
+plots_discrete_alpha_only_dataset4/
+runs_discrete_alpha_only_dataset0/
+runs_discrete_alpha_only_dataset1/
+runs_discrete_alpha_only_dataset2/
+runs_discrete_alpha_only_dataset3/
+runs_discrete_alpha_only_dataset4/
 # Python cache files
 __pycache__/
 *.pyc

@@ -9,11 +9,20 @@ import os
 # Parse arguments
 parser = argparse.ArgumentParser(description="Generate synthetic data")
 parser.add_argument('--dataset_id', type=int, default=0, help="Dataset ID for multi-dataset experiments")
+parser.add_argument('--dgp', type=str, default=None,
+                    help="Data generating process type (e.g., 'bimodal', 'uniform'). If None, uses default (discrete_alpha_only)")
 args = parser.parse_args()
 
 DATASET_ID = args.dataset_id
-DATA_DIR = f"data_dataset{DATASET_ID}"
-PLOT_DIR = f"plots_dataset{DATASET_ID}"
+DGP = args.dgp
+
+# Build directory names with optional DGP prefix
+if DGP:
+    DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+    PLOT_DIR = f"plots_{DGP}_dataset{DATASET_ID}"
+else:
+    DATA_DIR = f"data_dataset{DATASET_ID}"
+    PLOT_DIR = f"plots_dataset{DATASET_ID}"
 
 # Create directories
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -35,11 +44,23 @@ rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, interval=50, N=nS
 
 np.save(f"{DATA_DIR}/rewards_train.npy", rewardsTrain)
 
-true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='uniform', #ind_diff_type="discrete_alpha_only", #, #,
-                                          Delta_alpha=0.6, nSession=nSession)
+# Determine ind_diff_type based on --dgp argument
+if DGP == 'discrete_alpha_only':
+    ind_diff_type = 'discrete_alpha_only'
+    delta_alpha = 0.6
+elif DGP == 'uniform':
+    ind_diff_type = 'uniform'
+    delta_alpha = None
+else:
+    # Default: uniform (backward compatible with existing results)
+    ind_diff_type = 'uniform'
+    delta_alpha = None
 
-true_param_test = sim.generate_parameter_lists(true_model='FQ', ind_diff_type='uniform',#ind_diff_type="discrete_alpha_only",# ,#ind_diff_type='uniform', #,
-                                          Delta_alpha=0.6, nSession=nSession)
+true_param = sim.generate_parameter_lists(true_model='FQ', ind_diff_type=ind_diff_type,
+                                          Delta_alpha=delta_alpha, nSession=nSession)
+
+true_param_test = sim.generate_parameter_lists(true_model='FQ', ind_diff_type=ind_diff_type,
+                                          Delta_alpha=delta_alpha, nSession=nSession)
 
 true_param_df = pd.DataFrame(true_param)
 true_param_df.to_csv(f"{DATA_DIR}/true_parameter_values.csv", index=False)
@@ -87,4 +108,5 @@ np.save(f'{DATA_DIR}/pA_train.npy', pA)
 np.save(f'{DATA_DIR}/pA_test.npy', pA_test)
 np.save(f'{DATA_DIR}/c_train.npy', c)
 
-print(f"\n✅ Dataset {DATASET_ID} generated and saved to {DATA_DIR}/")
+dgp_info = f" (DGP: {DGP})" if DGP else " (DGP: default/discrete)"
+print(f"\n✅ Dataset {DATASET_ID}{dgp_info} generated and saved to {DATA_DIR}/")

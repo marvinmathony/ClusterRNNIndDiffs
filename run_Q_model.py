@@ -128,6 +128,8 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, help="KL weight for joint training (beta-VAE style)", default=0.1)
     parser.add_argument('--epochs', type=int, help="number of training epochs (Step 2)", default=10000)
     parser.add_argument('--step1_epochs', type=int, help="number of Step 1 (decoder pretraining) epochs; if None, uses --epochs", default=None)
+    parser.add_argument('--dgp', type=str, default=None,
+                        help="Data generating process type (e.g., 'bimodal', 'uniform'). Must match data_generation.py --dgp")
     args = parser.parse_args()
 
     # Step 1 epochs defaults to main epochs if not specified
@@ -135,8 +137,15 @@ if __name__ == '__main__':
         args.step1_epochs = args.epochs
 
     DATASET_ID = args.dataset_id
-    DATA_DIR = f"data_dataset{DATASET_ID}"
-    PLOT_DIR = f"plots_dataset{DATASET_ID}"
+    DGP = args.dgp
+
+    # Build directory names with optional DGP prefix
+    if DGP:
+        DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+        PLOT_DIR = f"plots_{DGP}_dataset{DATASET_ID}"
+    else:
+        DATA_DIR = f"data_dataset{DATASET_ID}"
+        PLOT_DIR = f"plots_dataset{DATASET_ID}"
 
     wandb_name = "RNNIndDiffs"
 
@@ -200,7 +209,11 @@ if __name__ == '__main__':
     if HP_RUN_DIR and latent:
         run_dir = HP_RUN_DIR
     else:
-        BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
+        # Build runs directory with optional DGP prefix
+        if DGP:
+            BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+        else:
+            BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
         run_dir = os.path.join(BASE_DIR, f"seed_{seed_value}")
     ckpt_dir = os.path.join(run_dir, "checkpoints")
     rsa_dir  = os.path.join(run_dir, "rsa")
