@@ -79,16 +79,21 @@ def create_model_from_config(model_config, n_participants, device, frozen_decode
     in_dim = model_config["in_dim"]
     z_dim = model_config["z_dim"]
     hidden = model_config["hidden"]
+    enc_hidden = model_config.get("enc_hidden", hidden)
     A = model_config["A"]
     block_structure = model_config.get("block_structure", False)
     model_type = model_config.get("model_type", "IDRNN")
+    enc_in_dim = model_config.get("enc_in_dim", in_dim)
+    # Use training participant count for loading frozen decoder (checkpoint was saved with training data)
+    n_participants_train = model_config.get("n_participants_train", n_participants)
 
     if model_type == "IDRNN" or model_type == "latent":
         if frozen_decoder_path is None:
             raise ValueError("frozen_decoder_path required for IDRNN model")
 
         # Load the frozen decoder from the policy model
-        temp_encoder = LookupEncoderZ(n_participants=n_participants, z_dim=z_dim)
+        # Use n_participants_train since the checkpoint was saved with training data
+        temp_encoder = LookupEncoderZ(n_participants=n_participants_train, z_dim=z_dim)
         temp_decoder = Decoder(in_dim=in_dim, z_dim=z_dim, hid=hidden, A=A)
         temp_model = LatentRNNz(
             encoder=temp_encoder,
@@ -102,7 +107,7 @@ def create_model_from_config(model_config, n_participants, device, frozen_decode
         temp_model.load_state_dict(torch.load(frozen_decoder_path, map_location=device))
 
         # Create IDRNN model with frozen decoder
-        encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=hidden)
+        encoder_IDRNN = IDRNN(in_dim=enc_in_dim, z_dim=z_dim, hid=enc_hidden)
         frozen_decoder = copy.deepcopy(temp_model.decoder)
         for p in frozen_decoder.parameters():
             p.requires_grad = False
@@ -167,7 +172,8 @@ def compute_matched_and_mismatched_loss(
     targets,
     n_random_samples=50,
     is_latent_model=True,
-    device='cpu'
+    device='cpu',
+    x_enc_input=None
 ):
     """
     Compute matched and mismatched reconstruction losses.
@@ -195,7 +201,8 @@ def compute_matched_and_mismatched_loss(
     if is_latent_model:
         # Get the encoder (IDRNN)
         # First, encode all participants to get their latents
-        x_enc = x_input.unsqueeze(1)  # (B, 1, T, in_dim)
+        x_for_enc = x_enc_input if x_enc_input is not None else x_input
+        x_enc = x_for_enc.unsqueeze(1)  # (B, 1, T, enc_in_dim)
         with torch.no_grad():
             mu, logvar = model.encoder(x_enc, return_per_timestep=False)
             z_matched = mu  # (B, z_dim) - use mean for matched
@@ -277,6 +284,13 @@ def compute_metrics_for_epoch(
 
     B, T, in_dim = xin_test.shape
 
+    # Load encoder-specific input if available (split encoder/decoder inputs)
+    xin_enc_path = f"{data_dir}/xin_enc_test.npy"
+    if os.path.exists(xin_enc_path):
+        xin_enc_test = torch.from_numpy(np.load(xin_enc_path)).float().to(device)
+    else:
+        xin_enc_test = None
+
     # Load model config from run directory
     model_config = load_model_config(run_dir)
 
@@ -343,7 +357,8 @@ def compute_metrics_for_epoch(
         targets=c_test,
         n_random_samples=50,
         is_latent_model=is_latent_model,
-        device=device
+        device=device,
+        x_enc_input=xin_enc_test
     )
 
     return metrics

@@ -34,7 +34,7 @@ TASK_ID=$SLURM_ARRAY_TASK_ID
 
 # Parameter grid
 LAMBDAS=(0 0.01 0.02 0.03 0.04)
-Z_DIMS=(2 3 4)
+Z_DIMS=(1 2 3)
 SEEDS=(12 50)  # Only 2 seeds for fast exploration
 EPOCHS=3000    # Reduced from 10000
 DATASET_ID=0   # Single dataset for fast search

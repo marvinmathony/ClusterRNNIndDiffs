@@ -24,8 +24,14 @@ MIN_EPOCH = args.min_epoch
 MAX_EPOCH = args.max_epoch
 DGP = args.dgp
 
+# Determine if this is human data (sloutsky/palminteri/spatial_bandit)
+is_human_data = DGP in ("sloutsky", "palminteri", "spatial_bandit")
+
 # Build runs directory with optional DGP prefix
-if DGP:
+# Human data (sloutsky/palminteri) doesn't use dataset IDs
+if is_human_data:
+    BASE_DIR = f"runs_{DGP}" if latent else f"runs_vanilla_{DGP}"
+elif DGP:
     BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
 else:
     BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"

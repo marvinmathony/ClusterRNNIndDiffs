@@ -3,7 +3,7 @@
 #SBATCH --output=logs/dataset_parallel_%a_%j.out
 #SBATCH --error=logs/dataset_parallel_%a_%j.err
 #SBATCH --open-mode=append
-#SBATCH --array=0-4
+#SBATCH --array=0-15
 #SBATCH --time=24:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=20
@@ -33,7 +33,7 @@ DATASET_ID=$SLURM_ARRAY_TASK_ID
 
 # Data Generating Process (DGP) configuration
 # Set to empty string for default (discrete_alpha_only), or specify e.g. "bimodal", "uniform"
-# Can be overridden when submitting: sbatch --export=DGP=bimodal run_dataset_parallel.sbatch
+# Can be overridden when submitting: sbatch --export=DGP=discrete_alpha_only run_dataset_parallel.sbatch
 DGP="${DGP:-}"
 
 # Build DGP argument string for python scripts
@@ -58,13 +58,13 @@ export PYTHONUNBUFFERED=1
 export CUDA_VISIBLE_DEVICES=0
 
 # Configuration
-LMBD=0.05
+LMBD=0.3
 Z_DIM=3
 SEEDS=(12 50 76 100 142)
 
 # Step 1: Generate data
 echo "Generating dataset $DATASET_ID$DGP_INFO..."
-python data_generation.py --dataset_id $DATASET_ID $DGP_ARG
+#python data_generation.py --dataset_id $DATASET_ID $DGP_ARG
 
 # Step 2: Train latent models
 echo "Training latent models for dataset $DATASET_ID$DGP_INFO..."
@@ -100,7 +100,7 @@ python select_best_epoch_by_rsa.py --latent False --dataset_id $DATASET_ID $DGP_
 
 # Step 5: Test models
 echo "Testing models for dataset $DATASET_ID$DGP_INFO..."
-python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting False $DGP_ARG
-python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting False $DGP_ARG
+python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting True $DGP_ARG
+python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting True $DGP_ARG
 
 echo "Dataset $DATASET_ID$DGP_INFO completed at: $(date)"

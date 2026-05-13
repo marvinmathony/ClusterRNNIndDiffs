@@ -40,17 +40,21 @@ def compute_reconstruction_specificity(
     x_input,
     targets,
     n_random_samples=50,
-    device='cpu'
+    device='cpu',
+    x_enc_input=None
 ):
     """
     Compute reconstruction specificity for IDRNN.
 
     Returns the mean difference between mismatched and matched reconstruction losses.
+    x_enc_input: optional separate encoder input (e.g. participant-specific dims only).
+                 If None, x_input is used for both encoder and decoder.
     """
     B = x_input.shape[0]
 
     # Get the latents for each participant
-    x_enc = x_input.unsqueeze(1)  # (B, 1, T, in_dim)
+    x_for_enc = x_enc_input if x_enc_input is not None else x_input
+    x_enc = x_for_enc.unsqueeze(1)  # (B, 1, T, enc_in_dim)
     with torch.no_grad():
         mu, logvar = model.encoder(x_enc, return_per_timestep=False)
         z_matched = mu  # (B, z_dim)
@@ -96,8 +100,8 @@ def compute_reconstruction_specificity(
 
 def main():
     # Epoch window configuration (must match analyze_synthetic_multi_dataset.py)
-    DEFAULT_MAX_EPOCH = 3000  # Epoch cutoff to prevent overtraining
-    DEFAULT_MIN_EPOCH = 1000  # Minimum epoch to consider
+    DEFAULT_MAX_EPOCH = 1000  # Epoch cutoff to prevent overtraining
+    DEFAULT_MIN_EPOCH = 0  # Minimum epoch to consider
 
     parser = argparse.ArgumentParser(description="Select best epoch by reconstruction specificity")
     parser.add_argument('--latent', type=lambda x: x.lower() == 'true', default=True,
@@ -121,14 +125,34 @@ def main():
     MAX_EPOCH = args.max_epoch
     DGP = args.dgp
 
+    # Determine if this is human data (sloutsky/palminteri/spatial_bandit)
+    is_human_data = DGP in ("sloutsky", "palminteri", "spatial_bandit")
+
     # Build directory names with optional DGP prefix
-    if DGP:
+    # Human data (sloutsky/palminteri) doesn't use dataset IDs
+    if is_human_data:
+        BASE_DIR = f"runs_{DGP}" if is_latent else f"runs_vanilla_{DGP}"
+        DATA_DIR = f"data_{DGP}"
+    elif DGP:
         BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
         DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
     else:
         BASE_DIR = f"runs_dataset{DATASET_ID}" if is_latent else f"runs_vanilla_dataset{DATASET_ID}"
         DATA_DIR = f"data_dataset{DATASET_ID}"
-    SEEDS = [12, 50, 76, 100, 142]
+
+    # Detect available seeds by looking at which seed_* directories exist
+    available_seeds = []
+    if os.path.exists(BASE_DIR):
+        for d in os.listdir(BASE_DIR):
+            if d.startswith("seed_"):
+                try:
+                    seed_num = int(d.split("_")[1])
+                    available_seeds.append(seed_num)
+                except ValueError:
+                    pass
+    SEEDS = sorted(available_seeds)
+    if not SEEDS:
+        raise RuntimeError(f"No seed directories found in {BASE_DIR}")
 
     model_type = "IDRNN" if is_latent else "Vanilla"
     print(f"\n{'='*80}")
@@ -144,6 +168,10 @@ def main():
     xin_test = torch.from_numpy(xin_test).float().to(device)
     c_test = torch.from_numpy(c_test).float().to(device)
     B, T, in_dim = xin_test.shape
+
+    # Load encoder-specific input if available (split encoder/decoder inputs)
+    _enc_path = f"{DATA_DIR}/xin_enc_test.npy"
+    xin_enc_test = torch.from_numpy(np.load(_enc_path)).float().to(device) if os.path.exists(_enc_path) else None
 
     # Find available epochs
     def list_epochs_for_seed(seed):
@@ -199,7 +227,8 @@ def main():
                     temp_model = LatentRNNz(encoder=temp_encoder, decoder=temp_decoder,
                                              hid=hidden, z_dim=z_dim, in_dim=in_dim, A=2,
                                              block_structure=False)
-                    temp_model.load_state_dict(torch.load(frozen_decoder_path, map_location=device))
+                    # Use strict=False since we only need decoder weights (encoder size may differ)
+                    temp_model.load_state_dict(torch.load(frozen_decoder_path, map_location=device), strict=False)
 
                     encoder_IDRNN = IDRNN(in_dim=in_dim, z_dim=z_dim, hid=hidden)
                     frozen_decoder = copy.deepcopy(temp_model.decoder)
@@ -220,7 +249,8 @@ def main():
 
                 # Compute specificity
                 spec, matched, mismatched = compute_reconstruction_specificity(
-                    model, xin_test, c_test, n_random_samples=30, device=device
+                    model, xin_test, c_test, n_random_samples=30, device=device,
+                    x_enc_input=xin_enc_test
                 )
 
                 epoch_specificities.append(spec)

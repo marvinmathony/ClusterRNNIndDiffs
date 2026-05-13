@@ -90,7 +90,7 @@ def evaluate_hyperparam_combo(lmbd, z_dim, dataset_id, seeds, dgp=None):
 
     for seed in seeds:
         # Check both possible run directory patterns
-        run_dir_hp = f"hp_search_runs/lmbd_{lmbd}_z_{z_dim}/seed_{seed}"
+        run_dir_hp = f"hp_search_runs_{dgp}/lmbd_{lmbd}_z_{z_dim}/seed_{seed}" if dgp else f"hp_search_runs/lmbd_{lmbd}_z_{z_dim}/seed_{seed}"
         if dgp:
             run_dir_std = f"runs_{dgp}_dataset{dataset_id}/seed_{seed}"
         else:

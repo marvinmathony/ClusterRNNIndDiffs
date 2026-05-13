@@ -20,7 +20,7 @@ import torch
 from sklearn.decomposition import PCA
 
 # Configuration
-N_DATASETS = 5
+N_DATASETS = 21
 SEEDS = [12, 50, 76, 100, 142]
 
 # Parse arguments for DGP support
@@ -432,8 +432,8 @@ def plot_rsa_aggregated(rsa_dict, output_dir):
     ax.errorbar(x_pos, means, yerr=sems, fmt='none', capsize=5, capthick=1,
                 ecolor='black', elinewidth=1, zorder=11)
 
-    # Significance test between IDRNN and vanilla
-    _, p_value = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'])
+    # Significance test between IDRNN and vanilla (one-tailed: H1: IDRNN > Vanilla)
+    _, p_value = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'], alternative='greater')
     ymax = max(means) + max(sems)
     h = ymax * 0.02
     add_sig(ax, 0, 1, ymax + h, h, p_value)
@@ -861,6 +861,210 @@ def plot_alpha_vs_z(all_results, output_dir):
         print(f"✅ Saved aggregated alpha vs z plot to {output_dir}/alpha_vs_z_aggregated.png")
 
 
+def plot_combined_figure(rsa_dict, likelihood_summary, all_results, output_dir, dataset_id_for_alpha=13):
+    """
+    Create a combined figure with three panels:
+    A) Aggregated model likelihoods
+    B) Aggregated RSA correlation
+    C) Alpha vs z for a specific dataset
+    """
+    from matplotlib.gridspec import GridSpec
+    from matplotlib.patches import Patch
+
+    # Get data for alpha vs z plot (dataset 13 by default)
+    results = all_results.get(dataset_id_for_alpha)
+    if results is None:
+        print(f"Warning: Dataset {dataset_id_for_alpha} not found for alpha vs z plot")
+        return
+
+    latent_tensor = results.get('latent_tensor')
+    params = results.get('params')
+
+    if latent_tensor is None or params is None:
+        print(f"Warning: Missing data for dataset {dataset_id_for_alpha}")
+        return
+
+    # Process latent tensor
+    if hasattr(latent_tensor, 'detach'):
+        latent_np = latent_tensor.detach().cpu().numpy()
+    else:
+        latent_np = latent_tensor
+
+    if len(latent_np.shape) == 3:
+        z_values = latent_np[:, -1, :]
+        z_dim = latent_np.shape[2]
+    elif len(latent_np.shape) == 2:
+        z_values = latent_np
+        z_dim = latent_np.shape[1]
+    else:
+        z_values = latent_np.reshape(-1, 1)
+        z_dim = 1
+
+    alpha_values = params
+
+    # Reduce to 1D if needed
+    if z_dim == 1:
+        z_1d = z_values.flatten()
+    else:
+        pca = PCA(n_components=1)
+        z_1d = pca.fit_transform(z_values).flatten()
+
+    # Create figure with GridSpec layout
+    # Layout: top row = likelihoods (wide), bottom row = RSA (left) + alpha vs z (right)
+    fig = plt.figure(figsize=(14, 10))
+    gs = GridSpec(2, 2, figure=fig, height_ratios=[1, 1], width_ratios=[1, 1],
+                  hspace=0.3, wspace=0.3)
+
+    # Panel A: Model likelihoods (top row, spanning both columns)
+    ax_likelihood = fig.add_subplot(gs[0, :])
+
+    models = ['Q CP', 'Q MAP', 'FQ CP', 'FQ MAP', 'RNN CP', 'RNN ID', 'Vanilla RNN']
+    means = [
+        likelihood_summary['Q_common']['mean'],
+        likelihood_summary['Q_MAP']['mean'],
+        likelihood_summary['FQ_common']['mean'],
+        likelihood_summary['FQ_MAP']['mean'],
+        likelihood_summary['RNN_common']['mean'],
+        likelihood_summary['RNN_ID']['mean'],
+        likelihood_summary['RNN_vanilla']['mean']
+    ]
+    sems = [
+        likelihood_summary['Q_common']['sem'],
+        likelihood_summary['Q_MAP']['sem'],
+        likelihood_summary['FQ_common']['sem'],
+        likelihood_summary['FQ_MAP']['sem'],
+        likelihood_summary['RNN_common']['sem'],
+        likelihood_summary['RNN_ID']['sem'],
+        likelihood_summary['RNN_vanilla']['sem']
+    ]
+
+    grey_common = "#a19f9f"
+    grey_indiv = "#545454"
+    green_common = "#93cd90ac"
+    green_indiv = "#3ba83b"
+    blue_common = '#a0c4e8'
+    blue_indiv = "#2a82c2"
+    orange = "#e1861f"
+
+    bar_colors = [grey_common, grey_indiv, green_common, green_indiv, blue_common, blue_indiv, orange]
+
+    bars = ax_likelihood.bar(models, means, yerr=sems, capsize=3, color=bar_colors, alpha=0.9,
+                              error_kw={'elinewidth': 1, 'capthick': 1})
+
+    # Add individual dataset points
+    keys = ['Q_common', 'Q_MAP', 'FQ_common', 'FQ_MAP', 'RNN_common', 'RNN_ID', 'RNN_vanilla']
+    for i, key in enumerate(keys):
+        values = likelihood_summary[key]['values']
+        if len(values) > 0:
+            x = np.random.normal(i, 0.04, size=len(values))
+            ax_likelihood.scatter(x, values, alpha=0.4, c='black', s=15, zorder=10)
+
+    true_model_mean = likelihood_summary['True_model']['mean']
+    ax_likelihood.axhline(true_model_mean, linestyle='--', color='black', linewidth=1.5, label='True model')
+
+    legend_elements = [
+        Patch(facecolor=grey_indiv, label='Q model'),
+        Patch(facecolor=green_indiv, label='FQ model'),
+        Patch(facecolor=blue_indiv, label='ID RNN'),
+        Patch(facecolor=orange, label='Vanilla RNN'),
+    ]
+    legend1 = ax_likelihood.legend(handles=legend_elements, title='Model type', loc='upper left',
+                                    ncol=len(legend_elements), frameon=False)
+    ax_likelihood.add_artist(legend1)
+
+    legend_elements2 = [
+        Patch(facecolor='#c0c0c0', label='Common process (CP)'),
+        Patch(facecolor='#606060', label='Individual differences (ID)'),
+    ]
+    ax_likelihood.legend(handles=legend_elements2, title='Fit type', loc='upper right', frameon=False)
+
+    # Statistical tests
+    try:
+        if len(likelihood_summary['Q_common']['values']) > 1:
+            _, p_q = ttest_rel(likelihood_summary['Q_common']['values'],
+                              likelihood_summary['Q_MAP']['values'])
+            _, p_fq = ttest_rel(likelihood_summary['FQ_common']['values'],
+                               likelihood_summary['FQ_MAP']['values'])
+            _, p_rnn = ttest_rel(likelihood_summary['RNN_common']['values'],
+                                likelihood_summary['RNN_ID']['values'])
+            _, p_rnn_vanilla = ttest_rel(likelihood_summary['RNN_vanilla']['values'],
+                                        likelihood_summary['RNN_ID']['values'])
+
+            ymax = max([m for m in means if not np.isnan(m)])
+            h = ymax * 0.01
+            add_sig(ax_likelihood, 0, 1, ymax + h*2, h, p_q)
+            add_sig(ax_likelihood, 2, 3, ymax + h*2, h, p_fq)
+            add_sig(ax_likelihood, 4, 5, ymax + h*2, h, p_rnn)
+            add_sig(ax_likelihood, 5, 6, ymax - h, h, p_rnn_vanilla)
+    except Exception as e:
+        print(f"Warning: Could not compute statistical tests: {e}")
+
+    ax_likelihood.set_ylabel('Mean negative log likelihood per participant', fontsize=11)
+    ax_likelihood.set_ylim(bottom=true_model_mean - 2)
+    ax_likelihood.spines['top'].set_visible(False)
+    ax_likelihood.spines['right'].set_visible(False)
+    ax_likelihood.text(-0.05, 1.06, 'A', transform=ax_likelihood.transAxes, fontsize=16, fontweight='bold', va='top')
+
+    # Panel B: RSA correlation (bottom left)
+    ax_rsa = fig.add_subplot(gs[1, 0])
+
+    rsa_models = ['IDRNN', 'vanilla']
+    rsa_means = [rsa_dict['IDRNN']['mean'], rsa_dict['vanilla']['mean']]
+    rsa_sems = [rsa_dict['IDRNN']['sem'], rsa_dict['vanilla']['sem']]
+    rsa_bar_colors = ['#2a82c2', '#e1861f']
+    x_pos = np.arange(len(rsa_models))
+
+    ax_rsa.bar(x_pos, rsa_means, color=rsa_bar_colors, alpha=0.85, width=0.6)
+
+    np.random.seed(42)
+    for i, model in enumerate(rsa_models):
+        corrs = rsa_dict[model]['corrs']
+        jitter = np.random.uniform(-0.15, 0.15, size=len(corrs))
+        ax_rsa.scatter(x_pos[i] + jitter, corrs, alpha=0.5, c='black', s=20, zorder=10,
+                       edgecolors='none', label='Individual datasets' if i == 0 else None)
+
+    ax_rsa.errorbar(x_pos, rsa_means, yerr=rsa_sems, fmt='none', capsize=5, capthick=1,
+                    ecolor='black', elinewidth=1, zorder=11)
+
+    _, p_value = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'], alternative='greater')
+    ymax = max(rsa_means) + max(rsa_sems)
+    h = ymax * 0.02
+    add_sig(ax_rsa, 0, 1, ymax + h, h, p_value)
+
+    ax_rsa.set_ylabel('Correlation with ground truth', fontsize=11)
+    ax_rsa.set_xticks(x_pos)
+    ax_rsa.set_xticklabels(['RNN ID', 'Vanilla RNN'])
+    ax_rsa.set_ylim(bottom=0)
+    ax_rsa.legend(loc='lower right', fontsize=9)
+    ax_rsa.spines['top'].set_visible(False)
+    ax_rsa.spines['right'].set_visible(False)
+    ax_rsa.text(-0.1, 1.05, 'B', transform=ax_rsa.transAxes, fontsize=16, fontweight='bold', va='top')
+
+    # Panel C: Alpha vs z (bottom right)
+    ax_alpha = fig.add_subplot(gs[1, 1])
+
+    scatter = ax_alpha.scatter(alpha_values, z_1d, c=alpha_values, cmap='viridis',
+                               alpha=0.7, edgecolors='k', linewidths=0.5)
+
+    corr = np.corrcoef(alpha_values, z_1d)[0, 1]
+    z_fit = np.polyfit(alpha_values, z_1d, 1)
+    p_fit = np.poly1d(z_fit)
+    x_line = np.linspace(alpha_values.min(), alpha_values.max(), 100)
+    ax_alpha.plot(x_line, p_fit(x_line), 'r--', linewidth=2, label=f'r = {corr:.3f}')
+
+    ax_alpha.set_xlabel('Alpha (Data Generating Process)', fontsize=11)
+    ylabel = 'z (Latent)' if z_dim == 1 else 'z (PC1)'
+    ax_alpha.set_ylabel(ylabel, fontsize=11)
+    ax_alpha.legend(loc='best', fontsize=9)
+    plt.colorbar(scatter, ax=ax_alpha, label='Alpha')
+    ax_alpha.text(-0.1, 1.05, 'C', transform=ax_alpha.transAxes, fontsize=16, fontweight='bold', va='top')
+
+    plt.savefig(f"{output_dir}/combined_figure.png", dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"✅ Saved combined figure to {output_dir}/combined_figure.png")
+
+
 def main():
     """Main analysis function."""
     print("="*80)
@@ -910,6 +1114,7 @@ def main():
     plot_likelihoods_aggregated(likelihood_summary, output_dir)
     plot_per_dataset_breakdown(all_results, output_dir)
     plot_alpha_vs_z(all_results, output_dir)
+    plot_combined_figure(rsa_dict, likelihood_summary, all_results, output_dir, dataset_id_for_alpha=13)
 
     # Save summary statistics
     summary_path = f"{output_dir}/summary_statistics.txt"
@@ -929,11 +1134,11 @@ def main():
         f.write(f"  IDRNN:       {rsa_dict['IDRNN']['mean']:.4f} ± {rsa_dict['IDRNN']['sem']:.4f}\n")
         f.write(f"  Vanilla RNN: {rsa_dict['vanilla']['mean']:.4f} ± {rsa_dict['vanilla']['sem']:.4f}\n")
 
-        # Add significance test result
+        # Add significance test result (one-tailed: H1: IDRNN > Vanilla)
         from scipy.stats import ttest_rel
-        _, p_val = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'])
+        _, p_val = ttest_rel(rsa_dict['IDRNN']['corrs'], rsa_dict['vanilla']['corrs'], alternative='greater')
         sig_str = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "n.s."
-        f.write(f"  Paired t-test: p = {p_val:.4f} {sig_str}\n\n")
+        f.write(f"  Paired t-test (one-tailed, H1: IDRNN > Vanilla): p = {p_val:.4f} {sig_str}\n\n")
 
         f.write("MODEL LIKELIHOODS:\n")
         for key, data in likelihood_summary.items():

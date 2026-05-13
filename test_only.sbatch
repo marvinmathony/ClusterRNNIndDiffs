@@ -24,6 +24,6 @@ DATASET_ID=$SLURM_ARRAY_TASK_ID
 
 # Step 5: Test models
 echo "Testing models for dataset $DATASET_ID..."
-python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting True
-python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting True
+python testing_script.py --latent True --dataset_id $DATASET_ID --model_fitting True --dgp discrete_alpha_only
+python testing_script.py --latent False --dataset_id $DATASET_ID --model_fitting True --dgp discrete_alpha_only
 echo "Dataset $DATASET_ID completed at: $(date)"
