@@ -691,72 +691,206 @@ for wlabel, lo_t, hi_t in WINDOWS_REG:
         coef_env_only=c_env, coef_full=c_full,
     ))
 
-# ── Plot: added-variable plot per window + bar chart summary ──────────────────
-n_w = len(WINDOWS_REG)
-fig, axes = plt.subplots(2, n_w, figsize=(5 * n_w, 9))
+# ── Plot: added-variable plot (full task) + bar chart summary ────────────────
+# Restricted to the Full window for the manuscript figure.
+rec_full = next(r for r in reg_records if r["window"].startswith("Full"))
+fig, axes = plt.subplots(2, 1, figsize=(6, 9))
 
-for wi, rec in enumerate(reg_records):
-    h_w, i_w, v_w = rec["m_h"], rec["m_i"], rec["m_v"]
-    n = rec["n"]
+h_w, i_w, v_w = rec_full["m_h"], rec_full["m_i"], rec_full["m_v"]
+n = rec_full["n"]
 
-    # Top row: added-variable plot — residualize against vanilla
-    ax = axes[0, wi]
-    c_env_only = rec["coef_env_only"]
-    res_h  = h_w - (c_env_only[0] + c_env_only[1] * v_w)
-    # Residualize m_i against m_v
-    Xe = np.column_stack([np.ones(n), v_w])
-    coef_iv, _ = _r2_lr(Xe, i_w)
-    res_i  = i_w - (coef_iv[0] + coef_iv[1] * v_w)
+# Top: added-variable plot — residualize against vanilla
+ax = axes[0]
+c_env_only = rec_full["coef_env_only"]
+res_h = h_w - (c_env_only[0] + c_env_only[1] * v_w)
+Xe = np.column_stack([np.ones(n), v_w])
+coef_iv, _ = _r2_lr(Xe, i_w)
+res_i = i_w - (coef_iv[0] + coef_iv[1] * v_w)
 
-    ax.scatter(res_i, res_h, color="#4C72B0", s=22, alpha=0.65,
-               edgecolors="black", linewidths=0.3, zorder=3)
-    slope = rec["coef_full"][2]
-    intercept = res_h.mean() - slope * res_i.mean()
-    xx = np.linspace(res_i.min(), res_i.max(), 50)
-    ax.plot(xx, intercept + slope * xx, color="black", lw=2, ls="--",
-            label=f"slope = β_id = {slope:+.3f}")
-    ax.axhline(0, color="grey", lw=0.5, alpha=0.5)
-    ax.axvline(0, color="grey", lw=0.5, alpha=0.5)
-    ax.set_xlabel(r"m_IDRNN residual $\perp$ m_Vanilla", fontsize=10)
-    ax.set_ylabel(r"m_human residual $\perp$ m_Vanilla", fontsize=10)
-    star = ("***" if rec["p_b_id"] < 0.001 else
-            "**"  if rec["p_b_id"] < 0.01  else
-            "*"   if rec["p_b_id"] < 0.05  else "")
-    ax.set_title(f"{rec['window']}   n={n}\n"
-                 f"ΔR²={rec['incremental']:+.3f}  β_id p={rec['p_b_id']:.2e}{star}",
-                 fontsize=10, fontweight="bold")
-    ax.legend(fontsize=8)
-    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+ax.scatter(res_i, res_h, color="#4C72B0", s=22, alpha=0.65,
+           edgecolors="black", linewidths=0.3, zorder=3)
+slope = rec_full["coef_full"][2]
+intercept = res_h.mean() - slope * res_i.mean()
+xx = np.linspace(res_i.min(), res_i.max(), 50)
+ax.plot(xx, intercept + slope * xx, color="black", lw=2, ls="--",
+        label=f"slope = β_id = {slope:+.3f}")
+ax.set_xlabel(r"m_IDRNN residual $\perp$ m_Vanilla", fontsize=10)
+ax.set_ylabel(r"m_human residual $\perp$ m_Vanilla", fontsize=10)
+ax.legend(fontsize=8)
+ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
 
-    # Bottom row: R² bar chart (env-only / IDRNN-only / full) with bootstrap CI
-    ax = axes[1, wi]
-    labels = ["env\nonly", "IDRNN\nonly", "full"]
-    vals   = [rec["r2_env"], rec["r2_id"], rec["r2_full"]]
-    cis    = np.array([rec["ci_env"], rec["ci_id"], rec["ci_full"]])
-    err    = np.array([vals - cis[:, 0], cis[:, 1] - vals])
-    colors_ = ["#DD8452", "#4C72B0", "#55A868"]
-    bars = ax.bar(range(3), vals, yerr=err, color=colors_, capsize=5,
-                  edgecolor="black", linewidth=0.6)
-    ax.set_xticks(range(3))
-    ax.set_xticklabels(labels, fontsize=10)
-    ax.set_ylabel("R²", fontsize=10)
-    ax.set_title(f"ΔR² (full−env) = {rec['incremental']:+.3f}\n"
-                 f"P(ΔR²≤0)={rec['p_inc_le0']:.3f}",
-                 fontsize=10, fontweight="bold")
-    ax.set_ylim(0, max(float(cis[:, 1].max()), 0.05) + 0.05)
-    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-    ax.grid(axis="y", alpha=0.3, zorder=0)
+# Bottom: R² bar chart with bootstrap CI
+ax = axes[1]
+labels = ["env\nonly", "IDRNN\nonly", "full"]
+vals   = [rec_full["r2_env"], rec_full["r2_id"], rec_full["r2_full"]]
+cis    = np.array([rec_full["ci_env"], rec_full["ci_id"], rec_full["ci_full"]])
+err    = np.array([vals - cis[:, 0], cis[:, 1] - vals])
+colors_ = ["#DD8452", "#4C72B0", "#55A868"]
+ax.bar(range(3), vals, yerr=err, color=colors_, capsize=5,
+       edgecolor="black", linewidth=0.6)
+ax.set_xticks(range(3))
+ax.set_xticklabels(labels, fontsize=10)
+ax.set_ylabel("R²", fontsize=10)
+ax.set_ylim(0, max(float(cis[:, 1].max()), 0.05) + 0.05)
+ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+ax.grid(axis="y", alpha=0.3, zorder=0)
 
-fig.suptitle(
-    "Per-subject regression: m_human ~ m_vanilla (env) + m_IDRNN (env + policy)\n"
-    "Top row: added-variable plot (residuals after partialling out env).\n"
-    "Bottom row: R² of nested models with bootstrap 95% CIs.",
-    fontsize=12, fontweight="bold")
 fig.tight_layout()
 out = os.path.join(PLOT_DIR, "step1_variance_regression.png")
 fig.savefig(out, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Saved → {out}")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Camera-ready combined figure: nll_comparison_pooled.png (left) +
+# variance regression Full panels (right top/mid) + BIG5 regression with
+# Bayes factors (right bottom).
+# ══════════════════════════════════════════════════════════════════════════════
+import matplotlib.image as mpimg
+from matplotlib.gridspec import GridSpec
+
+NLL_PNG = "plots_thalmann/comparison/nll_comparison_pooled.png"
+if os.path.exists(NLL_PNG):
+    nll_img = mpimg.imread(NLL_PNG)
+
+    # ── Compute BIG5_open regression with Bayes factors ──────────────────────
+    # IDRNN: regression of BIG5 on raw z (emb_v).
+    # Vanilla: regression of BIG5 on vanilla h (loaded fresh from the saved
+    # latents file so feature dimensionality is correct).
+    import pandas as _pd
+    _q = _pd.read_csv("data/finalQuestionnaireDataSession1.csv").set_index("ID")
+    _q["BIG5_open"] = _q[[f"BIG_5_{i}" for i in range(6)]].mean(axis=1)
+    y_big5 = _q.reindex(subids_v)["BIG5_open"].values.astype(float)
+
+    # Vanilla latents
+    import glob as _glob
+    _van_glob = _glob.glob(
+        "plots_thalmann/step1_vs_vanilla/latents_vanilla_bestseed*.pt")
+    v_path = max(_van_glob, key=os.path.getmtime)
+    _v_saved = torch.load(v_path, map_location="cpu", weights_only=False)
+    v_h_all = np.asarray(_v_saved["h"])
+    v_sids  = np.asarray(_v_saved["subids"])
+    _v_idx  = {int(s): i for i, s in enumerate(v_sids)}
+    v_h_for_big5 = np.full((len(subids_v), v_h_all.shape[1]),
+                           np.nan, dtype=np.float32)
+    for i, s in enumerate(subids_v):
+        if int(s) in _v_idx:
+            v_h_for_big5[i] = v_h_all[_v_idx[int(s)]]
+
+    def _insample_r2(X, y):
+        valid = np.isfinite(y) & np.all(np.isfinite(X), axis=1)
+        Xv, yv = X[valid], y[valid]
+        n_v = len(yv)
+        Xa = np.column_stack([np.ones(n_v), Xv])
+        coef, *_ = np.linalg.lstsq(Xa, yv, rcond=None)
+        pred = Xa @ coef
+        ss_res = float(np.sum((yv - pred) ** 2))
+        ss_tot = float(np.sum((yv - yv.mean()) ** 2))
+        r2 = (1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+        return r2, n_v, Xv.shape[1]
+
+    def _bic_bf10(r2, n_, k):
+        """BIC-approximated BF10 for an OLS regression with k predictors:
+        compares the full model against the intercept-only null.
+        BF10 > 1 ⇒ evidence for alt; BF10 < 1 ⇒ evidence for null."""
+        delta_BIC = n_ * np.log(max(1 - r2, 1e-300)) + k * np.log(n_)
+        return float(np.exp(-delta_BIC / 2))
+
+    r2_id_big5, n_id, k_id = _insample_r2(emb_v, y_big5)
+    r2_v_big5,  n_v_, k_v  = _insample_r2(v_h_for_big5, y_big5)
+    bf_id = _bic_bf10(r2_id_big5, n_id, k_id)
+    bf_v  = _bic_bf10(r2_v_big5,  n_v_, k_v)
+    r_id_big5 = float(np.sqrt(max(r2_id_big5, 0)))
+    r_v_big5  = float(np.sqrt(max(r2_v_big5,  0)))
+
+    print(f"\nBIG5_open decoding (BIC Bayes factors):")
+    print(f"  IDRNN (k={k_id}): r=√R²={r_id_big5:.3f}, R²={r2_id_big5:.3f}, "
+          f"BF10={bf_id:.2e}")
+    print(f"  Vanilla (k={k_v}): r=√R²={r_v_big5:.3f}, R²={r2_v_big5:.3f}, "
+          f"BF10={bf_v:.2e}")
+
+    # ── Layout ───────────────────────────────────────────────────────────────
+    fig = plt.figure(figsize=(15, 11))
+    gs = GridSpec(3, 2, figure=fig, width_ratios=[2.0, 1.0],
+                  hspace=0.40, wspace=0.20)
+
+    # Left: NLL spanning all rows
+    ax_nll = fig.add_subplot(gs[:, 0])
+    ax_nll.imshow(nll_img)
+    ax_nll.axis("off")
+
+    # Right top: added-variable plot for the Full window
+    rec = next(r for r in reg_records if r["window"].startswith("Full"))
+    h_w, i_w, v_w = rec["m_h"], rec["m_i"], rec["m_v"]
+    n = rec["n"]
+    c_env_only = rec["coef_env_only"]
+    res_h = h_w - (c_env_only[0] + c_env_only[1] * v_w)
+    Xe = np.column_stack([np.ones(n), v_w])
+    coef_iv, _ = _r2_lr(Xe, i_w)
+    res_i = i_w - (coef_iv[0] + coef_iv[1] * v_w)
+    slope = rec["coef_full"][2]
+    intercept = res_h.mean() - slope * res_i.mean()
+    xx = np.linspace(res_i.min(), res_i.max(), 50)
+
+    ax_av = fig.add_subplot(gs[0, 1])
+    ax_av.scatter(res_i, res_h, color="#4C72B0", s=18, alpha=0.65,
+                  edgecolors="black", linewidths=0.3, zorder=3)
+    ax_av.plot(xx, intercept + slope * xx, color="black", lw=2, ls="--",
+               label=f"slope = β_id = {slope:+.3f}")
+    ax_av.set_xlabel(r"m_IDRNN residual $\perp$ m_Vanilla", fontsize=10)
+    ax_av.set_ylabel(r"m_human residual $\perp$ m_Vanilla", fontsize=10)
+    ax_av.legend(fontsize=8)
+    ax_av.spines["top"].set_visible(False)
+    ax_av.spines["right"].set_visible(False)
+
+    # Right middle: R² bar chart from variance regression
+    ax_bar = fig.add_subplot(gs[1, 1])
+    labels = ["env\nonly", "IDRNN\nonly", "full"]
+    vals = [rec["r2_env"], rec["r2_id"], rec["r2_full"]]
+    cis = np.array([rec["ci_env"], rec["ci_id"], rec["ci_full"]])
+    err = np.array([vals - cis[:, 0], cis[:, 1] - vals])
+    colors_ = ["#DD8452", "#4C72B0", "#55A868"]
+    ax_bar.bar(range(3), vals, yerr=err, color=colors_, capsize=5,
+               edgecolor="black", linewidth=0.6)
+    ax_bar.set_xticks(range(3))
+    ax_bar.set_xticklabels(labels, fontsize=10)
+    ax_bar.set_ylabel("R²", fontsize=10)
+    ax_bar.set_ylim(0, max(float(cis[:, 1].max()), 0.05) + 0.05)
+    ax_bar.spines["top"].set_visible(False)
+    ax_bar.spines["right"].set_visible(False)
+    ax_bar.grid(axis="y", alpha=0.3, zorder=0)
+
+    # Right bottom: BIG5_open r for IDRNN vs Vanilla, BF10 annotated
+    ax_big5 = fig.add_subplot(gs[2, 1])
+    big5_vals   = [r_id_big5, r_v_big5]
+    big5_colors = ["#4C72B0", "#DD8452"]
+    big5_labels = ["IDRNN", "Vanilla"]
+    ax_big5.bar(range(2), big5_vals, color=big5_colors,
+                edgecolor="black", linewidth=0.6)
+    ax_big5.set_xticks(range(2))
+    ax_big5.set_xticklabels(big5_labels, fontsize=10)
+    ax_big5.set_ylabel(r"BIG5-openness $r$ (= $\sqrt{R^2}$)", fontsize=10)
+    # Annotations: BF10 above each bar
+    for i, (v, bf) in enumerate(zip(big5_vals, [bf_id, bf_v])):
+        if bf >= 100 or bf < 0.01:
+            bf_str = f"BF$_{{10}}$ = {bf:.1e}"
+        else:
+            bf_str = f"BF$_{{10}}$ = {bf:.2f}"
+        ax_big5.text(i, v + 0.01, bf_str, ha="center", va="bottom",
+                     fontsize=9, fontweight="bold")
+    ax_big5.set_ylim(0, max(big5_vals) * 1.35 + 0.02)
+    ax_big5.spines["top"].set_visible(False)
+    ax_big5.spines["right"].set_visible(False)
+    ax_big5.grid(axis="y", alpha=0.3, zorder=0)
+
+    out = os.path.join(PLOT_DIR, "comparison",
+                       "nll_and_variance_regression.png")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    fig.savefig(out, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved → {out}")
+else:
+    print(f"  (skipped combined figure — {NLL_PNG} not found)")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Decode questionnaire scales from on-policy rollout means.

@@ -45,6 +45,9 @@ runs_discrete_alpha_only_dataset1/
 runs_discrete_alpha_only_dataset2/
 runs_discrete_alpha_only_dataset3/
 runs_discrete_alpha_only_dataset4/
+runs*/
+plots*/
+data*/
 # Python cache files
 __pycache__/
 *.pyc

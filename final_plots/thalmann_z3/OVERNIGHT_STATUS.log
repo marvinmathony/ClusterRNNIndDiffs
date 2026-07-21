@@ -1,0 +1,16 @@
+[2026-05-29 23:05:59] ===== overnight monitor started =====
+[2026-05-29 23:05:59] watching: stage_c (nc_tha_*) = 180 jobs ; full-retrain (full_tha_*) = 30 jobs
+[2026-05-30 01:30:01] --- stage_c complete: per-fold seed success counts ---
+[2026-05-30 01:30:02]     idrnn fold0: 30/30 seeds with cv_val_loss   (runs_thalmann_nested_cv_z3/fold0)
+[2026-05-30 01:30:03]     idrnn fold1: 30/30 seeds with cv_val_loss   (runs_thalmann_nested_cv_z3/fold1)
+[2026-05-30 01:30:04]     idrnn fold2: 30/30 seeds with cv_val_loss   (runs_thalmann_nested_cv_z3/fold2)
+[2026-05-30 01:30:05]     vanilla fold0: 30/30 seeds with cv_val_loss   (runs_vanilla_thalmann_nested_cv_z3/fold0)
+[2026-05-30 01:30:06]     vanilla fold1: 30/30 seeds with cv_val_loss   (runs_vanilla_thalmann_nested_cv_z3/fold1)
+[2026-05-30 01:30:06]     vanilla fold2: 30/30 seeds with cv_val_loss   (runs_vanilla_thalmann_nested_cv_z3/fold2)
+[2026-05-30 01:54:07] --- full-cohort retrain complete: step1_z_lookup presence ---
+[2026-05-30 01:54:07]     idrnn: 15/15 seeds have step1_z_lookup.npy   (final_plots/thalmann_z3_full/canonical/idrnn/runs)
+[2026-05-30 01:54:07]     vanilla: 0/15 seeds have step1_z_lookup.npy   (final_plots/thalmann_z3_full/canonical/vanilla/runs)
+[2026-05-30 01:54:07] --- best full-retrain IDRNN seed by step1_specificity (preview for extraction) ---
+    idrnn: best seed=2023  step1_specificity=0.13151865482330327
+    vanilla: best seed=401  cv_val_loss=0.5593777298927307
+[2026-05-30 01:54:09] ===== ALL OVERNIGHT TRAINING COMPLETE — ready for extraction + panels =====

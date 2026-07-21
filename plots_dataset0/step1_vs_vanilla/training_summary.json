@@ -1,0 +1,62 @@
+{
+  "dataset_id": 0,
+  "idrnn": {
+    "best_seed": 76,
+    "best_specificity": 0.08919739723205566,
+    "seed_records": {
+      "12": {
+        "specificity": 0.08402598500251768,
+        "matched_nll": 0.4686345160007477,
+        "mismatched_nll": 0.5526605010032654
+      },
+      "50": {
+        "specificity": 0.05510597825050356,
+        "matched_nll": 0.4719448387622833,
+        "mismatched_nll": 0.5270508170127869
+      },
+      "76": {
+        "specificity": 0.08919739723205566,
+        "matched_nll": 0.46975594758987427,
+        "mismatched_nll": 0.5589533448219299
+      },
+      "100": {
+        "specificity": 0.06422826647758484,
+        "matched_nll": 0.47076675295829773,
+        "mismatched_nll": 0.5349950194358826
+      },
+      "142": {
+        "specificity": 0.04570571184158323,
+        "matched_nll": 0.4742615222930908,
+        "mismatched_nll": 0.519967234134674
+      }
+    }
+  },
+  "vanilla": {
+    "best_seed": 76,
+    "best_nll": 0.48740479350090027,
+    "seed_records": {
+      "12": {
+        "final_nll": 0.4908977448940277
+      },
+      "50": {
+        "final_nll": 0.49197250604629517
+      },
+      "76": {
+        "final_nll": 0.48740479350090027
+      },
+      "100": {
+        "final_nll": 0.49567168951034546
+      },
+      "142": {
+        "final_nll": 0.49556639790534973
+      }
+    }
+  },
+  "config": {
+    "z_dim": 3,
+    "hidden": 10,
+    "A": 2,
+    "base_in_dim": 4,
+    "n_epochs": 3000
+  }
+}

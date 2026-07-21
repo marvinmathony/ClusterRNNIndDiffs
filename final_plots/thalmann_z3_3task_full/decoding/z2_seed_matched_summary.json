@@ -1,0 +1,125 @@
+{
+  "selection_rule": "horizon-switch anchor (argmax|corr(dim,switch_horizon)|, sign>0)",
+  "seed_avg": {
+    "r_wm": [
+      -0.3161,
+      0.0142
+    ],
+    "r_open": [
+      0.2028,
+      0.0205
+    ],
+    "r_cei": [
+      0.1586,
+      0.0073
+    ],
+    "pr_open_wm": [
+      0.1934,
+      0.018
+    ],
+    "pr_cei_wm": [
+      0.1575,
+      0.0171
+    ],
+    "pr_open_sw": [
+      0.2134,
+      0.0206
+    ],
+    "pr_sw_open": [
+      -0.0611,
+      0.0152
+    ],
+    "pr_sw2a": [
+      0.0816,
+      0.0733
+    ],
+    "pr_swre": [
+      0.1643,
+      0.0421
+    ],
+    "pr_swho": [
+      0.7304,
+      0.0361
+    ],
+    "r_sw": [
+      0.428,
+      0.0634
+    ]
+  },
+  "within_seed_pca": {
+    "ws_r_wm": [
+      -0.2696,
+      0.0158
+    ],
+    "ws_r_open": [
+      0.177,
+      0.0363
+    ],
+    "ws_r_cei": [
+      0.1291,
+      0.0171
+    ]
+  },
+  "open_summary_baselines": {
+    "overall_switch": 0.034,
+    "horizon_switch": 0.157
+  },
+  "pca": {
+    "exp_pc": 1,
+    "var_explained": [
+      0.358,
+      0.293,
+      0.255,
+      0.019,
+      0.017
+    ],
+    "fingerprint": [
+      -0.063,
+      0.107,
+      0.648,
+      -0.247,
+      0.149,
+      -0.26
+    ],
+    "r_wm": -0.279,
+    "r_open": 0.292,
+    "r_cei": 0.185,
+    "r_sw_horizon": 0.648,
+    "top_pcs": {
+      "PC1": {
+        "r_wm": 0.279,
+        "r_open": -0.292,
+        "r_cei": -0.185,
+        "r_swho": -0.648
+      },
+      "PC2": {
+        "r_wm": 0.053,
+        "r_open": 0.025,
+        "r_cei": -0.027,
+        "r_swho": -0.34
+      },
+      "PC3": {
+        "r_wm": -0.215,
+        "r_open": -0.015,
+        "r_cei": 0.049,
+        "r_swho": 0.536
+      }
+    },
+    "validation": {
+      "simple_mean": {
+        "r_wm": -0.364,
+        "r_open": 0.235,
+        "r_cei": 0.183
+      },
+      "pooled_pca_loo": {
+        "r_wm": -0.28,
+        "r_open": 0.29,
+        "r_cei": 0.182
+      },
+      "cross_seed_reliability": 0.72,
+      "spearman_brown_10": 0.962,
+      "single_seed_open": 0.203,
+      "deattenuated_open": 0.239
+    }
+  }
+}

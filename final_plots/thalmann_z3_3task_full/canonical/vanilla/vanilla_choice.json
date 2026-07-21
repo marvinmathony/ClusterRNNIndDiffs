@@ -1,0 +1,6 @@
+{
+  "selected_seed": 400,
+  "score_key": "cv_val_loss",
+  "selected_seed_score": 0.48773981134096783,
+  "selected_run_dir": "final_plots/thalmann_z3_3task_full/canonical/vanilla/runs/seed_400"
+}

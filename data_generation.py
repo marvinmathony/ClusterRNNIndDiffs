@@ -11,10 +11,14 @@ parser = argparse.ArgumentParser(description="Generate synthetic data")
 parser.add_argument('--dataset_id', type=int, default=0, help="Dataset ID for multi-dataset experiments")
 parser.add_argument('--dgp', type=str, default=None,
                     help="Data generating process type (e.g., 'bimodal', 'uniform'). If None, uses default (discrete_alpha_only)")
+parser.add_argument('--interval', type=int, default=50,
+                    help="Reversal interval for gen_reward_seq (default 50). "
+                         "Set to a value larger than --nTrial to disable reversals.")
 args = parser.parse_args()
 
 DATASET_ID = args.dataset_id
 DGP = args.dgp
+INTERVAL = args.interval
 
 # Build directory names with optional DGP prefix
 if DGP:
@@ -36,8 +40,8 @@ nSession = 200
 
 
 # --- Data Generation ---
-rewardsTrain = sim.gen_reward_seq(seed=seed_base, T=nTrial, interval=50, N = nSession)
-rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, interval=50, N=nSession)
+rewardsTrain = sim.gen_reward_seq(seed=seed_base, T=nTrial, interval=INTERVAL, N = nSession)
+rewardsTest = sim.gen_reward_seq(seed=seed_base + 1, T=nTrial, interval=INTERVAL, N=nSession)
 
 #rewardsTrain = sim.generate_drifting_binary_bandit()
 #rewardsTest = sim.generate_drifting_binary_bandit()

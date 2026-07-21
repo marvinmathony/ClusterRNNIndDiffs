@@ -1,0 +1,57 @@
+{
+  "dgp": "thalmann",
+  "arch": "idrnn",
+  "dataset_id": null,
+  "hp": {
+    "unif_weight": 0.0,
+    "lmbd": 0.2,
+    "enc_hidden": 10,
+    "hidden": 10,
+    "z": 10
+  },
+  "hp_tag": "enc_hidden10_hidden10_lmbd0p2_unif_weight0_z10",
+  "selection_reason": "mode (wins 2/3 folds)",
+  "per_fold_winner_tags": [
+    "enc_hidden20_hidden10_lmbd0p2_unif_weight0_z10",
+    "enc_hidden10_hidden10_lmbd0p2_unif_weight0_z10",
+    "enc_hidden10_hidden10_lmbd0p2_unif_weight0_z10"
+  ],
+  "per_fold_winner_cv_val_loss": [
+    -0.7515726884206136,
+    -0.7242171499464248,
+    -0.7062160836325752
+  ],
+  "seeds": [
+    200,
+    300,
+    400,
+    500,
+    600,
+    999,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    401,
+    402,
+    403,
+    404,
+    405,
+    406,
+    407,
+    408,
+    409,
+    410,
+    411,
+    412,
+    413,
+    414,
+    415,
+    416,
+    417,
+    418,
+    419
+  ],
+  "canonical_runs_dir": "final_plots/thalmann/canonical/idrnn/runs"
+}

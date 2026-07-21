@@ -1,0 +1,103 @@
+{
+  "n_participants": 101,
+  "n_folds": 3,
+  "metric_for_seed_select": "step1_specificity",
+  "hypothesis_z": 2,
+  "cohort": "all_101_subjects",
+  "per_participant_csv": "final_plots/dezfouli_z2_full/per_participant_nll.csv",
+  "rsa": {
+    "idrnn": {
+      "spearman_r": 0.04092808752625309,
+      "spearman_p": 0.003626031910068784
+    },
+    "vanilla_h_pc": {
+      "spearman_r": 0.0641667671707588,
+      "spearman_p": 5.031263720980711e-06
+    }
+  },
+  "diag_decoding": {
+    "idrnn": {
+      "classes": [
+        "Healthy",
+        "Depression",
+        "Bipolar"
+      ],
+      "auc_per_class": [
+        0.6553994732221247,
+        0.520632133450395,
+        0.5049019607843137
+      ],
+      "auc_macro": 0.5603111891522778,
+      "accuracy": 0.40594059405940597,
+      "confusion_matrix": [
+        [
+          20,
+          9,
+          5
+        ],
+        [
+          12,
+          8,
+          14
+        ],
+        [
+          14,
+          6,
+          13
+        ]
+      ],
+      "per_class_accuracy": [
+        0.5882352941176471,
+        0.23529411764705882,
+        0.3939393939393939
+      ]
+    },
+    "vanilla_h_pc": {
+      "classes": [
+        "Healthy",
+        "Depression",
+        "Bipolar"
+      ],
+      "auc_per_class": [
+        0.6935908691834943,
+        0.4666374012291484,
+        0.6577540106951872
+      ],
+      "auc_macro": 0.60599409370261,
+      "accuracy": 0.44554455445544555,
+      "confusion_matrix": [
+        [
+          26,
+          5,
+          3
+        ],
+        [
+          16,
+          4,
+          14
+        ],
+        [
+          14,
+          4,
+          15
+        ]
+      ],
+      "per_class_accuracy": [
+        0.7647058823529411,
+        0.11764705882352941,
+        0.45454545454545453
+      ]
+    }
+  },
+  "nll_mean_by_model": {
+    "Ill-spec. CP": 0.6931477394410617,
+    "Ill-spec. EM": 0.6912497229648884,
+    "Cog model CP": 0.5394750752834304,
+    "Cog model EM": 0.370490832496148,
+    "IDRNN": 0.34354187998146113,
+    "Vanilla RNN": 0.29516827658113864,
+    "CP RNN": 0.42776000787421026
+  },
+  "latent_source_note": "IDRNN uses STEP-1 lookup embeddings (101 subjects from full-cohort canonical retrain, seed 400). Vanilla uses canonical h_avg from full-cohort retrain (seed 2023). Both projected to 2 PC scores for strict dim match. Panel a NLL is unchanged \u2014 pulled from the 70/30 nested-CV per-fold test outputs which already cover all 101 subjects.",
+  "cp_rnn_note": "CP-RNN = IDRNN forwarded with z=zeros (uninformative latent). Computed per (fold, seed) on fold's test subjects, top-5 by step1_specificity, averaged across seeds. Pre-step-2.5 decoder used (matches rollout convention)."
+}

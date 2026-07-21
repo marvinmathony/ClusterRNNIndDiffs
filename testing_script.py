@@ -41,9 +41,11 @@ is_human_data = DGP in ("sloutsky", "palminteri", "spatial_bandit", "dezfouli", 
 if is_human_data:
     DATA_DIR = f"data_{DGP}" if FOLD is None else f"data_{DGP}/fold{FOLD}"
 elif DGP:
-    DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+    DATA_DIR = (f"data_{DGP}_dataset{DATASET_ID}" if FOLD is None
+                else f"data_{DGP}_dataset{DATASET_ID}/fold{FOLD}")
 else:
-    DATA_DIR = f"data_dataset{DATASET_ID}"
+    DATA_DIR = (f"data_dataset{DATASET_ID}" if FOLD is None
+                else f"data_dataset{DATASET_ID}/fold{FOLD}")
 n_fit_iter = 5
 vanilla_nametag = "vanilla"
 latent_nametag = "latentmodel"
@@ -64,9 +66,12 @@ elif DGP in ("spatial_bandit", "dezfouli", "thalmann"):
     df_train = df_train.rename(columns={'subid': 'session'})
     df_test = df_test.rename(columns={'subid': 'session'})
 
-# session_ll_df_test only exists for synthetic data
-if not is_human_data:
-    session_ll_df_test = pd.read_csv(f"{DATA_DIR}/session_ll_df_test.csv")
+# session_ll_df_test only exists in the global synthetic dataset, not in
+# per-fold subdirectories (make_synthetic_folds.py doesn't emit it because
+# fold test sets are a subject-disjoint partition of the original train set).
+_sllt_path = f"{DATA_DIR}/session_ll_df_test.csv"
+if (not is_human_data) and os.path.exists(_sllt_path):
+    session_ll_df_test = pd.read_csv(_sllt_path)
 else:
     session_ll_df_test = None
 
@@ -87,18 +92,24 @@ xin_enc_test  = torch.from_numpy(np.load(_enc_test_path)).float().to(device)  if
 xin_enc_train = torch.from_numpy(np.load(_enc_train_path)).float().to(device) if os.path.exists(_enc_train_path) else None
 
 # Build runs directory
+_suffix = f"_{args.run_suffix}" if args.run_suffix else ""
 if is_human_data:
-    _suffix = f"_{args.run_suffix}" if args.run_suffix else ""
     _runs_base = f"runs_{DGP}{_suffix}" if latent else f"runs_vanilla_{DGP}{_suffix}"
-    BASE_DIR = os.path.join(_runs_base, f"fold{FOLD}") if FOLD is not None else _runs_base
 elif DGP:
-    BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+    _runs_base = (f"runs_{DGP}_dataset{DATASET_ID}{_suffix}" if latent
+                   else f"runs_vanilla_{DGP}_dataset{DATASET_ID}{_suffix}")
 else:
-    BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
+    _runs_base = (f"runs_dataset{DATASET_ID}{_suffix}" if latent
+                   else f"runs_vanilla_dataset{DATASET_ID}{_suffix}")
+BASE_DIR = (os.path.join(_runs_base, f"fold{FOLD}") if FOLD is not None
+            else _runs_base)
 
 
-# ── For human data: iterate over all seeds using per-seed CV checkpoint ────────
-if is_human_data:
+# ── For human data (or fold-mode synthetic): iterate per-seed using each
+# seed's CV-selected checkpoint (cv_selected_epoch from config.json).
+# Fold-mode synthetic goes through palminteri_CV during training (see
+# run_Q_model.py:use_inner_cv), so the same per-seed iteration applies.
+if is_human_data or FOLD is not None:
     seed_dirs = sorted([
         d for d in os.listdir(BASE_DIR)
         if d.startswith("seed_") and os.path.isdir(os.path.join(BASE_DIR, d))

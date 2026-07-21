@@ -1,0 +1,10 @@
+cohort,extraction,representation,PANAS_PA,PANAS_NA,CEI,BIG5_open,WM_composite,source
+both-sess (175),S1+S2,vanilla avg,-0.021,-0.0143,-0.0042,0.0348,0.0698,confound_causal_tests.npz test2/3
+both-sess (175),S1+S2,vanilla concat,-0.0156,-0.0131,-0.0166,0.0163,0.0563,confound_causal_tests.npz test4
+both-sess (175),S1 only,vanilla avg,-0.0145,-0.0157,-0.0121,0.0041,0.0262,confound_causal_tests.npz test3
+both-sess (175),(trained z),IDRNN,-0.0137,-0.0157,-0.0087,0.0313,0.1188,kill-test 2026-07-12
+has_s1 (236),all available,"vanilla avg (exclude-only, corrected)",-0.0067,-0.0054,0.0203,0.0105,0.0698,baqnbmgv0 corrected run (S1-only rows = true S1 average)
+has_s1 (236),all available,vanilla avg (legacy mask: zero-blocks included),0.0283,0.024,0.0207,0.0075,0.0698,b9q6paj6l run
+has_s1 (236),all available,vanilla concat,0.0281,0.0281,0.0167,0.0042,0.0563,b9q6paj6l run (S2-part=0 for 61)
+has_s1 (236),S1 only,vanilla avg,-0.0129,-0.011,-0.0091,0.0016,0.0262,s1extract_decoding.csv
+has_s1 (236),(trained z),IDRNN,0.0077,0.02,0.0051,0.0335,0.1188,loo_r2_panel_s1extract.csv

@@ -1,0 +1,10 @@
+{
+  "arch": "vanilla",
+  "selected_seed": 2023,
+  "metric": "cv_val_loss",
+  "value": 0.28528358538945514,
+  "canonical_runs_dir": "final_plots/dezfouli_z2_full/canonical/vanilla/runs",
+  "selected_run_dir": "final_plots/dezfouli_z2_full/canonical/vanilla/runs/seed_2023",
+  "n_seeds_considered": 30,
+  "cohort": "all_101_subjects"
+}

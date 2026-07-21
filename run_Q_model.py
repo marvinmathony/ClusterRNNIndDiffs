@@ -93,6 +93,13 @@ if __name__ == '__main__':
     parser.add_argument('--unif_weight', type=float, default=0.0,
                         help="Weight for uniformity loss on encoder z (Wang & Isola 2020). "
                              "0 = disabled. Encourages participants to be spread in z-space.")
+    parser.add_argument('--block_weight_mode', type=str, default="task0_zero",
+                        choices=["task0_zero", "uniform"],
+                        help="thalmann IDRNN decoder-NLL block weighting. 'task0_zero' "
+                             "(default) zero-weights the short 2-armed task (id 0) as in the "
+                             "main 2-task model; 'uniform' weights every block equally so each "
+                             "task contributes — used for the data-scaling (more-tasks) analysis "
+                             "so the model actually learns from every task it is given.")
     parser.add_argument('--z', type=int, help="dimension of latent space", default=1)
     parser.add_argument('--seed', type=int, help="random seed", default=42)
     parser.add_argument('--latent', type=lambda x: x.lower() == 'true', help="latent or vanilla modeling", default=False)
@@ -136,6 +143,11 @@ if __name__ == '__main__':
                         help="If True, IDRNN encoder GRU carries hidden state across all "
                              "block boundaries (use for multi-task datasets like thalmann). "
                              "Default False preserves per-block independent behaviour.")
+    parser.add_argument('--data_dir', type=str, default=None,
+                        help="Optional explicit data directory override. If set, loads "
+                             "train/test arrays from this dir instead of the DGP-derived "
+                             "default (e.g. data_thalmann_full/ for a full-cohort canonical "
+                             "retrain). Purely additive; default None preserves all behaviour.")
     args = parser.parse_args()
 
     # Step 1 epochs defaults to main epochs if not specified
@@ -149,17 +161,30 @@ if __name__ == '__main__':
     # Determine if this is human data (sloutsky/palminteri/spatial_bandit/dezfouli/thalmann) via DGP
     is_human_data = DGP in ("sloutsky", "palminteri", "spatial_bandit", "dezfouli", "thalmann") or palminteri
 
+    # use_inner_cv: True whenever we want the palminteri-style 3-split inner CV
+    # (selects best epoch from a train/val split of the training fold).  Human
+    # data always uses this.  Synthetic data with --fold also uses it so that
+    # nested-CV HP search can pick winners from config.json["cv_val_loss"].
+    use_inner_cv = is_human_data or (FOLD is not None)
+
     # Build directory names with optional DGP prefix
     # Human data (sloutsky/palminteri) doesn't use dataset IDs
     if is_human_data:
         DATA_DIR = f"data_{DGP}" if FOLD is None else f"data_{DGP}/fold{FOLD}"
         PLOT_DIR = f"plots_{DGP}"
     elif DGP:
-        DATA_DIR = f"data_{DGP}_dataset{DATASET_ID}"
+        DATA_DIR = (f"data_{DGP}_dataset{DATASET_ID}" if FOLD is None
+                    else f"data_{DGP}_dataset{DATASET_ID}/fold{FOLD}")
         PLOT_DIR = f"plots_{DGP}_dataset{DATASET_ID}"
     else:
-        DATA_DIR = f"data_dataset{DATASET_ID}"
+        DATA_DIR = (f"data_dataset{DATASET_ID}" if FOLD is None
+                    else f"data_dataset{DATASET_ID}/fold{FOLD}")
         PLOT_DIR = f"plots_dataset{DATASET_ID}"
+
+    # Explicit override (e.g. full-cohort canonical retrain reading from
+    # data_thalmann_full/).  Additive: only takes effect when --data_dir is set.
+    if args.data_dir:
+        DATA_DIR = args.data_dir
 
     wandb_name = "RNNIndDiffs"
 
@@ -284,7 +309,11 @@ if __name__ == '__main__':
         task_emb_dim    = args.task_emb_dim if DGP == "thalmann" else 0
         task_ids_tensor = None
         if DGP == "thalmann":
-            _tid_path = os.path.join("data_thalmann", "task_ids_per_block.npy")
+            # Prefer task_ids from the active data dir (e.g. data_thalmann_s2_full
+            # has 62 blocks for pooled S1+S2); fall back to the 31-block S1 root.
+            _tid_path = os.path.join(DATA_DIR, "task_ids_per_block.npy")
+            if not os.path.exists(_tid_path):
+                _tid_path = os.path.join("data_thalmann", "task_ids_per_block.npy")
             task_ids_np = np.load(_tid_path)
             task_ids_tensor = torch.from_numpy(task_ids_np).long().to(device)
             n_tasks = int(task_ids_np.max()) + 1
@@ -306,9 +335,21 @@ if __name__ == '__main__':
         # --- Load CSVs ---
         df_train = pd.read_csv(f"{DATA_DIR}/df_train.csv")
         df_test = pd.read_csv(f"{DATA_DIR}/df_test.csv")
-        session_ll_df_test = pd.read_csv(f"{DATA_DIR}/session_ll_df_test.csv")
-        test_parameter_df = pd.read_csv(f"{DATA_DIR}/true_test_parameter_values.csv")
-        train_parameter_df = pd.read_csv(f"{DATA_DIR}/true_parameter_values.csv")
+        # session_ll_df_test only exists in the original (non-fold) synthetic
+        # dataset, where it was produced by data_generation.py for the global
+        # train/test pair.  In --fold mode, the held-out set is a subject-disjoint
+        # partition of the training simulation (no session_ll precomputed).
+        _sllt_path = f"{DATA_DIR}/session_ll_df_test.csv"
+        session_ll_df_test = (pd.read_csv(_sllt_path) if os.path.exists(_sllt_path)
+                              else None)
+        # Parameter CSVs: original layout vs fold-subset layout (emitted by
+        # make_synthetic_folds.py).
+        if os.path.exists(f"{DATA_DIR}/true_param_train.csv"):
+            train_parameter_df = pd.read_csv(f"{DATA_DIR}/true_param_train.csv")
+            test_parameter_df  = pd.read_csv(f"{DATA_DIR}/true_param_test.csv")
+        else:
+            train_parameter_df = pd.read_csv(f"{DATA_DIR}/true_parameter_values.csv")
+            test_parameter_df  = pd.read_csv(f"{DATA_DIR}/true_test_parameter_values.csv")
 
         # --- Load NumPy arrays ---
         xin_train = np.load(f"{DATA_DIR}/xin_train.npy")
@@ -338,6 +379,30 @@ if __name__ == '__main__':
         B, T, in_dim = xin_train.shape
         B_test, T_test, in_dim_test = xin_test.shape
 
+        # Labels used by palminteri-style inner-CV training (fold-mode synthetic).
+        # Mirrors the human-data branch so downstream code paths can share them.
+        _y_train_labels = c_train.long()
+        _y_test_labels  = c_test.long()
+
+        # Synthetic has no task embedding and no separate encoder input; mirror
+        # the human-data variables so downstream model-config logging works.
+        task_emb_dim = 0
+        task_ids_tensor = None
+        n_tasks = None
+        dec_in_dim = in_dim
+        enc_in_dim = in_dim
+        xin_enc_train = xin_train
+
+        # Synthetic-fold mode has no separate val set (only train/test inside
+        # the fold).  Set has_val=False and zero out val tensors so the
+        # palminteri training functions take their no-val code path.
+        if FOLD is not None:
+            has_val = False
+            xin_val = None
+            xin_enc_val = None
+            choice_one_hot_val = None
+            c_val = None
+
     os.makedirs("checkpoints", exist_ok=True)
     os.makedirs(PLOT_DIR, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -363,15 +428,17 @@ if __name__ == '__main__':
     else:
         # Build runs directory with optional DGP prefix
         # Human data (sloutsky/palminteri) doesn't use dataset IDs
+        _suffix = f"_{args.run_suffix}" if args.run_suffix else ""
         if is_human_data:
-            _suffix = f"_{args.run_suffix}" if args.run_suffix else ""
             BASE_DIR = f"runs_{DGP}{_suffix}" if latent else f"runs_vanilla_{DGP}{_suffix}"
         elif DGP:
-            BASE_DIR = f"runs_{DGP}_dataset{DATASET_ID}" if latent else f"runs_vanilla_{DGP}_dataset{DATASET_ID}"
+            BASE_DIR = (f"runs_{DGP}_dataset{DATASET_ID}{_suffix}" if latent
+                        else f"runs_vanilla_{DGP}_dataset{DATASET_ID}{_suffix}")
         else:
-            BASE_DIR = f"runs_dataset{DATASET_ID}" if latent else f"runs_vanilla_dataset{DATASET_ID}"
+            BASE_DIR = (f"runs_dataset{DATASET_ID}{_suffix}" if latent
+                        else f"runs_vanilla_dataset{DATASET_ID}{_suffix}")
         # For outer CV folds, nest under fold{k}/
-        if FOLD is not None and is_human_data:
+        if FOLD is not None:
             run_dir = os.path.join(BASE_DIR, f"fold{FOLD}", f"seed_{seed_value}")
         else:
             run_dir = os.path.join(BASE_DIR, f"seed_{seed_value}")
@@ -499,7 +566,7 @@ if __name__ == '__main__':
             # Step 1: Train decoder with lookup embeddings
             step1_epochs = args.step1_epochs
             print(f"[Step 1] Training decoder for {step1_epochs} epochs...")
-            if is_human_data:
+            if use_inner_cv:
                 if has_val:
                     B_val,_,_ = xin_val.shape
                     val_ids = torch.arange(B_val)
@@ -514,13 +581,19 @@ if __name__ == '__main__':
 
             # Step-1 specificity (matched vs mismatched lookup-z NLL on training
             # subjects) + raw lookup-z dump.  Used downstream to rank seeds when
-            # pooling outer-CV NLL across multiple training seeds.
-            if is_human_data:
+            # pooling outer-CV NLL across multiple training seeds.  Also used by
+            # nested_cv.select_canonical to pick the canonical IDRNN seed
+            # (after the no-fold retrain on the full training set).
+            if True:
                 try:
                     _step1_n_mismatch = 50
                     model.eval()
+                    # ids was created on CPU (torch.arange(B)) but the encoder
+                    # lookup table lives on `device`; index_select needs both
+                    # on the same device.
+                    _ids_dev = ids.to(device)
                     with torch.no_grad():
-                        _logits_m, _, _ = model(ids, xin_train)
+                        _logits_m, _, _ = model(_ids_dev, xin_train)
                         _mask  = (c_train.reshape(-1) >= 0).float()
                         _denom = _mask.sum().clamp(min=1)
                         _log_p = torch.log_softmax(
@@ -617,7 +690,7 @@ if __name__ == '__main__':
             lookup_z   = z_lookup.to(device)
             #y_test = torch.argmax(choice_one_hot_test, dim=-1).unsqueeze(1)
 
-            if is_human_data:
+            if use_inner_cv:
                 if has_val:
                     z_val_lookup = training_dict["z_val"]
                     lookup_z_val = z_val_lookup.to(device)
@@ -659,7 +732,17 @@ if __name__ == '__main__':
                 # block (task_id=1) contributes to the policy loss.  The 30 two-armed
                 # blocks (task_id=0) are too short (10 trials) to carry reliable
                 # individual-difference signal and add noise to the encoder gradient.
-                _block_weights = task_ids_tensor.float() if (DGP == "thalmann" and task_ids_tensor is not None) else None
+                # Weight any non-2-armed block (task_id>0: restless, and horizon
+                # in the 3-task model) equally at 1; the short 2-armed task stays
+                # at 0.  (task_ids>0).float() == task_ids.float() for the 2-task
+                # case, so existing runs are unchanged.
+                if DGP == "thalmann" and task_ids_tensor is not None:
+                    if args.block_weight_mode == "uniform":
+                        _block_weights = torch.ones_like(task_ids_tensor, dtype=torch.float)
+                    else:
+                        _block_weights = (task_ids_tensor > 0).float()
+                else:
+                    _block_weights = None
 
                 cv_summary = train_latentrnn_IDRNN_palminteri_CV(LatentRNN_secondstep, IDRNN, hidden, z_dim, dec_in_dim,
                                                                 A, frozen_decoder, enc_in_dim, enc_hidden, _make_model_fn, xenc_train,
@@ -737,7 +820,7 @@ if __name__ == '__main__':
                            n_tasks=n_tasks, task_emb_dim=task_emb_dim).to(device)
         if task_ids_tensor is not None:
             model.set_task_ids(task_ids_tensor)
-        if is_human_data:
+        if use_inner_cv:
             y_train = _y_train_labels
             # CV to select the optimal number of training epochs
             cv_summary_vanilla = train_ablated_noblocks_palminteri_CV(

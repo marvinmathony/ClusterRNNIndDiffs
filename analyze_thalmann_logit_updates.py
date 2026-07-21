@@ -2334,4 +2334,493 @@ np.savez(os.path.join(PLOT_DIR, "step1_learning_curves.npz"),
          r_vanilla=r_vanilla)
 print(f"Saved → {os.path.join(PLOT_DIR, 'step1_learning_curves.npz')}")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CROSS-TASK INDIVIDUAL-DIFFERENCE TEST
+#
+# Goal: show that the per-participant latent z captures task-invariant
+# individual differences, not task-specific fitting artefacts. We compare
+# three regressions predicting task3 (horizon-task) human regret:
+#   R1 — human → human          (task0 + task1 human regret → task3 human regret)
+#   R2 — exact-env sim → human  (model on participant's own task0+task1 envs)
+#   R3 — marginalised sim → human (model on synthetic task0+task1 envs)
+#
+# Hypothesis: R3 ≥ R2 ≥ R1 because marginalisation distils the
+# z-driven signal away from environment-specific noise.
+#
+# Performance scalar per participant per task: mean per-trial regret in raw
+# points = mean(max(arm rewards) − received).
+# ══════════════════════════════════════════════════════════════════════════════
+print(f"\n{'='*70}")
+print("Cross-task regret prediction (R1 human / R2 exact-sim / R3 marg-sim → task3)")
+
+from simulate_two_armed_bandit import simulate_two_armed_bandit
+from simulate_two_armed_bandit import N_BLOCKS as T0_N_BLOCKS, BLOCK_LEN as T0_BLOCK_LEN
+
+# ── Task-0 rollout (4-way softmax masked to {0,1}) ────────────────────────────
+@torch.no_grad()
+def rollout_idrnn_reward_task0(z_vec, sched_blocks, rng):
+    """Continuous reward sequence from IDRNN on task0 (2-armed, 30 blocks × 10 trials).
+    sched_blocks: (30, 10, 2) raw per-trial reward1/reward2.
+    Action space masked to {0, 1} (renormalised softmax).
+
+    Hidden state is RE-INITIALISED to z2h0(z) at every block boundary —
+    matches training: LatentRNNz(block_structure=True) processes each block
+    by calling self.decoder(block_input, z, hidden=None) per block, and
+    Decoder.forward then initialises h ← z2h0(z) (modelsandtraining.py:47,
+    176-181). The participant-specific signal `z` is constant; only the
+    decoder GRU state resets each block. Trial-0 of each block uses zero
+    input (matches load_thalmann.py:90)."""
+    n_blocks, block_len, _ = sched_blocks.shape
+    z_t  = torch.as_tensor(z_vec, dtype=torch.float32, device=DEVICE).unsqueeze(0)
+    temb = task_emb_w[0].detach().cpu().numpy()
+    h_seed = decoder.z2h0(z_t).unsqueeze(0)  # initial h from participant's z
+    rew_cont = np.zeros((n_blocks, block_len), dtype=np.float32)
+    leak_mass = 0.0
+    for b in range(n_blocks):
+        h = h_seed.clone()  # re-seed at start of every block
+        prev = np.concatenate([np.zeros(5, dtype=np.float32), temb])
+        for t in range(block_len):
+            x = torch.as_tensor(prev, dtype=torch.float32,
+                                device=DEVICE).unsqueeze(0).unsqueeze(0)
+            logits, h = decoder(x, z_t, hidden=h)
+            full_p = F.softmax(logits[0, 0], dim=-1).detach().cpu().numpy()
+            leak_mass += float(full_p[2:].sum())
+            l01 = logits[0, 0, :2].detach().cpu().numpy()
+            p   = np.exp(l01 - l01.max());  p /= p.sum()
+            arm = int(rng.choice(2, p=p))
+            rew_cont[b, t] = float(sched_blocks[b, t, arm])
+            oh = np.zeros(A, dtype=np.float32); oh[arm] = 1.0
+            prev = np.concatenate([oh, [rew_cont[b, t] / REWARD_MAX], temb])
+    return rew_cont, leak_mass / (n_blocks * block_len)
+
+@torch.no_grad()
+def rollout_vanilla_reward_task0(sched_blocks, h_init, rng):
+    """Vanilla counterpart to rollout_idrnn_reward_task0.
+
+    Action space masked to {0, 1}. Hidden state is RE-INITIALIZED at every
+    block boundary — this matches how AblatedRNN was trained on Thalmann
+    (block_structure=True; AblatedRNN.forward starts each block from h=0,
+    see modelsandtraining.py:358).
+
+    h_init:
+      None   — zero-init at every block start (matches training exactly).
+      array  — post-hoc per-subject *averaged* hidden state (v_saved['h']),
+               re-injected at every block start. This is an evaluation trick
+               for Vanilla+h: vanilla has no trained per-participant h0, so
+               re-seeding h to a participant-typical state at every block
+               start is the closest analogue to giving vanilla a subject
+               channel."""
+    n_blocks, block_len, _ = sched_blocks.shape
+    temb = v_task_emb_w[0].detach().cpu().numpy()
+    if h_init is None:
+        h_seed = torch.zeros(1, 1, V_HIDDEN, device=DEVICE)
+    else:
+        h_seed = torch.as_tensor(h_init, dtype=torch.float32,
+                                 device=DEVICE).reshape(1, 1, V_HIDDEN)
+    rew_cont = np.zeros((n_blocks, block_len), dtype=np.float32)
+    for b in range(n_blocks):
+        h = h_seed.clone()  # re-seed at start of every block
+        prev = np.concatenate([np.zeros(V_BASE_IN_DIM, dtype=np.float32), temb])
+        for t in range(block_len):
+            x = torch.as_tensor(prev, dtype=torch.float32,
+                                device=DEVICE).unsqueeze(0).unsqueeze(0)
+            logits, h, _ = vanilla_model.dec(x, h0=h)
+            l01 = logits[0, 0, :2].detach().cpu().numpy()
+            p   = np.exp(l01 - l01.max()); p /= p.sum()
+            arm = int(rng.choice(2, p=p))
+            rew_cont[b, t] = float(sched_blocks[b, t, arm])
+            oh = np.zeros(V_A, dtype=np.float32); oh[arm] = 1.0
+            prev = np.concatenate([oh, [rew_cont[b, t] / REWARD_MAX], temb])
+    return rew_cont
+
+# ── Build per-participant task0 envs from the CSV ─────────────────────────────
+raw_task0 = pd.read_csv("data/final2armedBanditSession1.csv")
+human_envs_task0   = {}    # sid → (30, 10, 2)
+human_actual_task0 = {}    # sid → (30, 10)
+for sid, sub in raw_task0.groupby("ID"):
+    sub = sub.sort_values(["block", "trial"])
+    arms = sub[["reward1", "reward2"]].values.astype(np.float32)
+    rec  = sub["reward"].values.astype(np.float32)
+    if arms.shape[0] < T0_N_BLOCKS * T0_BLOCK_LEN:
+        continue
+    human_envs_task0[int(sid)]   = arms.reshape(T0_N_BLOCKS, T0_BLOCK_LEN, 2)
+    human_actual_task0[int(sid)] = rec.reshape(T0_N_BLOCKS, T0_BLOCK_LEN)
+
+# ── Build task3 (horizon) human regret ────────────────────────────────────────
+raw_h = pd.read_csv("data/finalHorizonSession1.csv").dropna(subset=["chosen"])
+hum_regret_task3_dict = {}
+for sid, sub in raw_h.groupby("ID"):
+    arms_max = sub[["reward1", "reward2"]].values.max(axis=1)
+    regret = arms_max - sub["reward"].values
+    h5 = sub["Horizon"].values == 5
+    hum_regret_task3_dict[int(sid)] = {
+        "all": float(regret.mean()),
+        "h5":  float(regret[h5].mean())  if h5.any()  else np.nan,
+        "h10": float(regret[~h5].mean()) if (~h5).any() else np.nan,
+    }
+print(f"  task3 participants with free trials: {len(hum_regret_task3_dict)}")
+
+# ── Pre-build the marginalisation env sets (shared across participants) ───────
+print(f"  Sampling {N_RNG_SEEDS} marginal envs for task0 and task1 ...")
+MARG_ENVS_T0 = [simulate_two_armed_bandit(s)["rewards"]    for s in range(N_RNG_SEEDS)]
+MARG_ENVS_T1 = [simulate_restless_bandit(s)["rewards"].astype(np.float32)
+                for s in range(N_RNG_SEEDS)]
+
+# Sanity-check the task0 generator vs empirical
+emp_diffs = []
+for sid, env in list(human_envs_task0.items())[:1]:
+    emp_diffs.extend(np.abs(env.mean(axis=1)[:, 0] - env.mean(axis=1)[:, 1]).tolist())
+gen_diffs = []
+for env in MARG_ENVS_T0:
+    gen_diffs.extend(np.abs(env.mean(axis=1)[:, 0] - env.mean(axis=1)[:, 1]).tolist())
+print(f"  task0 |Δμ| over round — empirical mean={np.mean(emp_diffs):.2f}, "
+      f"generator mean={np.mean(gen_diffs):.2f}")
+
+# ── Per-participant regret arrays ─────────────────────────────────────────────
+N = len(emb_v)
+hum_regret_task0       = np.full(N, np.nan)
+hum_regret_task1       = np.full(N, np.nan)
+hum_regret_task3       = np.full(N, np.nan)
+hum_regret_task3_h5    = np.full(N, np.nan)
+hum_regret_task3_h10   = np.full(N, np.nan)
+# IDRNN
+sim_regret_task0_exact = np.full(N, np.nan)
+sim_regret_task1_exact = np.full(N, np.nan)
+sim_regret_task0_marg  = np.full(N, np.nan)
+sim_regret_task1_marg  = np.full(N, np.nan)
+# Vanilla zero-init (canonical vanilla: matches training; no per-subject info)
+sim_regret_task0_van0_exact = np.full(N, np.nan)
+sim_regret_task1_van0_exact = np.full(N, np.nan)
+sim_regret_task0_van0_marg  = np.full(N, np.nan)
+sim_regret_task1_van0_marg  = np.full(N, np.nan)
+# Vanilla+h: post-hoc trick — re-seed h to the participant's averaged
+# trained-time hidden state at each block start. Not how vanilla was
+# trained; serves as an evaluation-time analogue of subject conditioning.
+sim_regret_task0_vanH_exact = np.full(N, np.nan)
+sim_regret_task1_vanH_exact = np.full(N, np.nan)
+sim_regret_task0_vanH_marg  = np.full(N, np.nan)
+sim_regret_task1_vanH_marg  = np.full(N, np.nan)
+leak_mass_accum        = []
+
+print("Computing regret for each participant (R2 task0 exact, R3 task0/task1 marg)...")
+for pi in range(N):
+    sid = int(subids_v[pi])
+    # Need all four data sources
+    if (sid not in human_envs_task0) or (sid not in human_envs) or \
+       (sid not in hum_regret_task3_dict):
+        continue
+
+    # ── Human regrets ─────────────────────────────────────────────────────────
+    arms_max_t0 = human_envs_task0[sid].max(axis=-1)        # (30, 10)
+    arms_max_t1 = human_envs[sid].max(axis=-1)              # (200,)
+    hum_regret_task0[pi] = float((arms_max_t0 - human_actual_task0[sid]).mean())
+    hum_regret_task1[pi] = float((arms_max_t1 - human_actual[sid]).mean())
+    hum_regret_task3[pi]     = hum_regret_task3_dict[sid]["all"]
+    hum_regret_task3_h5[pi]  = hum_regret_task3_dict[sid]["h5"]
+    hum_regret_task3_h10[pi] = hum_regret_task3_dict[sid]["h10"]
+
+    # ── R2 exact-env model regrets ────────────────────────────────────────────
+    # Task0: do 100 rollouts on participant's own env
+    sim_rew_t0_exact = np.zeros((T0_N_BLOCKS, T0_BLOCK_LEN), dtype=np.float64)
+    for s in range(N_RNG_SEEDS):
+        rng = np.random.default_rng(s * 10000 + sid + 7)
+        rew, leak = rollout_idrnn_reward_task0(emb_v[pi], human_envs_task0[sid], rng)
+        sim_rew_t0_exact += rew
+        if s == 0:
+            leak_mass_accum.append(leak)
+    sim_rew_t0_exact /= N_RNG_SEEDS
+    sim_regret_task0_exact[pi] = float((arms_max_t0 - sim_rew_t0_exact).mean())
+
+    # Task1: reuse the per-participant averaged reward curve already computed
+    if np.all(np.isfinite(idrnn_curves[pi])):
+        sim_regret_task1_exact[pi] = float((arms_max_t1 - idrnn_curves[pi]).mean())
+
+    # ── R3 marginalised-env model regrets ─────────────────────────────────────
+    sum_reg_t0 = 0.0
+    for s, env in enumerate(MARG_ENVS_T0):
+        rng = np.random.default_rng(s * 10000 + sid + 11)
+        rew, _ = rollout_idrnn_reward_task0(emb_v[pi], env, rng)
+        sum_reg_t0 += float((env.max(axis=-1) - rew).mean())
+    sim_regret_task0_marg[pi] = sum_reg_t0 / N_RNG_SEEDS
+
+    sum_reg_t1 = 0.0
+    for s, env in enumerate(MARG_ENVS_T1):
+        rng = np.random.default_rng(s * 10000 + sid + 13)
+        _, rew_t1, _ = rollout_logits(emb_v[pi], env, task_id=1, rng=rng)
+        sum_reg_t1 += float((env.max(axis=-1) - rew_t1).mean())
+    sim_regret_task1_marg[pi] = sum_reg_t1 / N_RNG_SEEDS
+
+    # ── Vanilla zero-init regrets (no individual differences) ─────────────────
+    sim_rew_t0_v0 = np.zeros((T0_N_BLOCKS, T0_BLOCK_LEN), dtype=np.float64)
+    for s in range(N_RNG_SEEDS):
+        rng = np.random.default_rng(s * 10000 + sid + 17)
+        sim_rew_t0_v0 += rollout_vanilla_reward_task0(human_envs_task0[sid],
+                                                     h_init=None, rng=rng)
+    sim_rew_t0_v0 /= N_RNG_SEEDS
+    sim_regret_task0_van0_exact[pi] = float((arms_max_t0 - sim_rew_t0_v0).mean())
+    if np.all(np.isfinite(vanilla_curves[pi])):
+        sim_regret_task1_van0_exact[pi] = float(
+            (arms_max_t1 - vanilla_curves[pi]).mean())
+    sum_reg = 0.0
+    for s, env in enumerate(MARG_ENVS_T0):
+        rng = np.random.default_rng(s * 10000 + sid + 23)
+        rew = rollout_vanilla_reward_task0(env, h_init=None, rng=rng)
+        sum_reg += float((env.max(axis=-1) - rew).mean())
+    sim_regret_task0_van0_marg[pi] = sum_reg / N_RNG_SEEDS
+    sum_reg = 0.0
+    for s, env in enumerate(MARG_ENVS_T1):
+        rng = np.random.default_rng(s * 10000 + sid + 31)
+        rew = rollout_vanilla_reward(env, task_id=1, rng=rng, h_init=None)
+        sum_reg += float((env.max(axis=-1) - rew).mean())
+    sim_regret_task1_van0_marg[pi] = sum_reg / N_RNG_SEEDS
+
+    # ── Vanilla per-subject h-init regrets ───────────────────────────────────
+    h_init = v_h_aligned[pi] if np.all(np.isfinite(v_h_aligned[pi])) else None
+    if h_init is not None:
+        sim_rew_t0_vH = np.zeros((T0_N_BLOCKS, T0_BLOCK_LEN), dtype=np.float64)
+        for s in range(N_RNG_SEEDS):
+            rng = np.random.default_rng(s * 10000 + sid + 19)
+            sim_rew_t0_vH += rollout_vanilla_reward_task0(human_envs_task0[sid],
+                                                         h_init=h_init, rng=rng)
+        sim_rew_t0_vH /= N_RNG_SEEDS
+        sim_regret_task0_vanH_exact[pi] = float((arms_max_t0 - sim_rew_t0_vH).mean())
+        if np.all(np.isfinite(vanilla_h_curves[pi])):
+            sim_regret_task1_vanH_exact[pi] = float(
+                (arms_max_t1 - vanilla_h_curves[pi]).mean())
+        sum_reg = 0.0
+        for s, env in enumerate(MARG_ENVS_T0):
+            rng = np.random.default_rng(s * 10000 + sid + 29)
+            rew = rollout_vanilla_reward_task0(env, h_init=h_init, rng=rng)
+            sum_reg += float((env.max(axis=-1) - rew).mean())
+        sim_regret_task0_vanH_marg[pi] = sum_reg / N_RNG_SEEDS
+        sum_reg = 0.0
+        for s, env in enumerate(MARG_ENVS_T1):
+            rng = np.random.default_rng(s * 10000 + sid + 37)
+            rew = rollout_vanilla_reward(env, task_id=1, rng=rng, h_init=h_init)
+            sum_reg += float((env.max(axis=-1) - rew).mean())
+        sim_regret_task1_vanH_marg[pi] = sum_reg / N_RNG_SEEDS
+
+    if (pi + 1) % 25 == 0:
+        print(f"  {pi+1}/{N} done")
+
+print(f"  Mean softmax leakage on arms 2,3 during task0 rollouts: "
+      f"{np.mean(leak_mass_accum):.4f}  (should be ≪ 0.1)")
+
+# ── Math sanity: task1 exact ─────────────────────────────────────────────────
+mask = np.isfinite(sim_regret_task1_exact)
+for pi in np.where(mask)[0][:3]:
+    sid = int(subids_v[pi])
+    arms_max_t1 = human_envs[sid].max(axis=-1)
+    lhs = sim_regret_task1_exact[pi] + idrnn_curves[pi].mean()
+    rhs = float(arms_max_t1.mean())
+    assert abs(lhs - rhs) < 1e-3, (pi, lhs, rhs)
+print("  Math sanity (task1 exact): regret + mean_reward == max_arm_mean ✓")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REGRESSIONS R1/R2/R3
+# ══════════════════════════════════════════════════════════════════════════════
+def _r_with_ci(x, y, n_boot=1000, seed=0):
+    """Pearson r with percentile-bootstrap 95% CI (paired over participants)."""
+    m = np.isfinite(x) & np.isfinite(y)
+    if m.sum() < 5:
+        return np.nan, (np.nan, np.nan), 0
+    x_, y_ = x[m], y[m]
+    r0 = float(np.corrcoef(x_, y_)[0, 1])
+    rng_ = np.random.default_rng(seed)
+    boots = np.empty(n_boot)
+    n = len(x_)
+    for i in range(n_boot):
+        idx = rng_.integers(0, n, size=n)
+        a, b = x_[idx], y_[idx]
+        if a.std() == 0 or b.std() == 0:
+            boots[i] = np.nan
+        else:
+            boots[i] = np.corrcoef(a, b)[0, 1]
+    lo, hi = np.nanpercentile(boots, [2.5, 97.5])
+    return r0, (float(lo), float(hi)), int(m.sum())
+
+
+def _ols_r2(x0, x1, y):
+    """Two-predictor OLS R²."""
+    m = np.isfinite(x0) & np.isfinite(x1) & np.isfinite(y)
+    if m.sum() < 5:
+        return np.nan, 0
+    X = np.column_stack([x0[m], x1[m], np.ones(m.sum())])
+    coef, *_ = np.linalg.lstsq(X, y[m], rcond=None)
+    yhat = X @ coef
+    ss_res = ((y[m] - yhat) ** 2).sum()
+    ss_tot = ((y[m] - y[m].mean()) ** 2).sum()
+    return float(1 - ss_res / ss_tot), int(m.sum())
+
+
+BLOCKS = [
+    ("R1 human→hu",      "Human",     hum_regret_task0,            hum_regret_task1),
+    ("R2 exact IDRNN",   "IDRNN",     sim_regret_task0_exact,      sim_regret_task1_exact),
+    ("R2 exact Van+h",   "Vanilla+h", sim_regret_task0_vanH_exact, sim_regret_task1_vanH_exact),
+    ("R2 exact Van",     "Vanilla",   sim_regret_task0_van0_exact, sim_regret_task1_van0_exact),
+    ("R3 marg IDRNN",    "IDRNN",     sim_regret_task0_marg,       sim_regret_task1_marg),
+    ("R3 marg Van+h",    "Vanilla+h", sim_regret_task0_vanH_marg,  sim_regret_task1_vanH_marg),
+    ("R3 marg Van",      "Vanilla",   sim_regret_task0_van0_marg,  sim_regret_task1_van0_marg),
+]
+TARGETS = [
+    ("task3 (all)",  hum_regret_task3),
+    ("task3 (h=5)",  hum_regret_task3_h5),
+    ("task3 (h=10)", hum_regret_task3_h10),
+]
+
+results = {}
+for block_name, _model, x_t0, x_t1 in BLOCKS:
+    for tname, y in TARGETS:
+        x_combined = 0.5 * (x_t0 + x_t1)
+        r_t0,  ci_t0,  n0 = _r_with_ci(x_t0,       y, seed=1)
+        r_t1,  ci_t1,  n1 = _r_with_ci(x_t1,       y, seed=2)
+        r_cb,  ci_cb,  nc = _r_with_ci(x_combined, y, seed=3)
+        R2_,   n_ols      = _ols_r2(x_t0, x_t1, y)
+        results[(block_name, tname)] = dict(
+            r_t0=r_t0, ci_t0=ci_t0, r_t1=r_t1, ci_t1=ci_t1,
+            r_combined=r_cb, ci_combined=ci_cb, R2_multi=R2_,
+            n=nc, n_ols=n_ols,
+        )
+
+print("\nResults (Pearson r [95% CI], two-predictor R²):")
+print(f"{'block':<18}{'target':<14}{'r_task0':>22}{'r_task1':>22}{'r_combined':>22}{'R²(both)':>12}")
+for (block, t), v in results.items():
+    fmt = lambda r, ci: f"{r:+.3f} [{ci[0]:+.2f},{ci[1]:+.2f}]"
+    print(f"{block:<18}{t:<14}{fmt(v['r_t0'], v['ci_t0']):>22}"
+          f"{fmt(v['r_t1'], v['ci_t1']):>22}"
+          f"{fmt(v['r_combined'], v['ci_combined']):>22}"
+          f"{v['R2_multi']:>+12.3f}")
+
+# ── Save raw arrays ──────────────────────────────────────────────────────────
+np.savez(
+    os.path.join(PLOT_DIR, "step1_cross_task_regret.npz"),
+    subids=subids_v,
+    hum_regret_task0=hum_regret_task0,
+    hum_regret_task1=hum_regret_task1,
+    hum_regret_task3=hum_regret_task3,
+    hum_regret_task3_h5=hum_regret_task3_h5,
+    hum_regret_task3_h10=hum_regret_task3_h10,
+    # IDRNN
+    sim_regret_task0_exact=sim_regret_task0_exact,
+    sim_regret_task1_exact=sim_regret_task1_exact,
+    sim_regret_task0_marg=sim_regret_task0_marg,
+    sim_regret_task1_marg=sim_regret_task1_marg,
+    # Vanilla zero-init
+    sim_regret_task0_van0_exact=sim_regret_task0_van0_exact,
+    sim_regret_task1_van0_exact=sim_regret_task1_van0_exact,
+    sim_regret_task0_van0_marg=sim_regret_task0_van0_marg,
+    sim_regret_task1_van0_marg=sim_regret_task1_van0_marg,
+    # Vanilla+h
+    sim_regret_task0_vanH_exact=sim_regret_task0_vanH_exact,
+    sim_regret_task1_vanH_exact=sim_regret_task1_vanH_exact,
+    sim_regret_task0_vanH_marg=sim_regret_task0_vanH_marg,
+    sim_regret_task1_vanH_marg=sim_regret_task1_vanH_marg,
+)
+print(f"Saved → {os.path.join(PLOT_DIR, 'step1_cross_task_regret.npz')}")
+
+# ── Plot ──────────────────────────────────────────────────────────────────────
+# Top:    3×3 scatter — IDRNN-focused (R1 human, R2 IDRNN, R3 IDRNN) × 3 targets
+# Middle: grouped bar — combined-predictor r across all 7 blocks × 3 targets
+# Bottom: focused bar — R3 IDRNN vs Vanilla+h vs Vanilla on task3-all only
+SCATTER_ROWS = [
+    ("R1 human→hu",    hum_regret_task0,       hum_regret_task1),
+    ("R2 exact IDRNN", sim_regret_task0_exact, sim_regret_task1_exact),
+    ("R3 marg IDRNN",  sim_regret_task0_marg,  sim_regret_task1_marg),
+]
+
+MODEL_COLORS = {
+    "Human":     "#666666",
+    "IDRNN":     "#4C72B0",
+    "Vanilla+h": "#8C564B",
+    "Vanilla":   "#DD8452",
+}
+
+fig = plt.figure(figsize=(16, 18))
+gs  = fig.add_gridspec(5, 3, height_ratios=[1, 1, 1, 0.9, 0.9], hspace=0.55, wspace=0.32)
+
+for ri, (block_name, x_t0, x_t1) in enumerate(SCATTER_ROWS):
+    x_combined = 0.5 * (x_t0 + x_t1)
+    for ci_, (tname, y) in enumerate(TARGETS):
+        ax = fig.add_subplot(gs[ri, ci_])
+        m = np.isfinite(x_combined) & np.isfinite(y)
+        ax.scatter(x_combined[m], y[m], s=22, alpha=0.55,
+                   color="#4C72B0", edgecolors="black", linewidths=0.3)
+        if m.sum() >= 5 and x_combined[m].std() > 0:
+            slope, intercept = np.polyfit(x_combined[m], y[m], 1)
+            xs_ = np.linspace(x_combined[m].min(), x_combined[m].max(), 50)
+            ax.plot(xs_, slope * xs_ + intercept, color="#C44E52", lw=1.6, ls="--")
+        v = results[(block_name, tname)]
+        ax.set_title(
+            f"{block_name}  vs  {tname}\n"
+            f"r_combined={v['r_combined']:+.2f} "
+            f"[{v['ci_combined'][0]:+.2f},{v['ci_combined'][1]:+.2f}]   "
+            f"R²(both)={v['R2_multi']:+.2f}",
+            fontsize=9, fontweight="bold"
+        )
+        ax.set_xlabel("combined regret (task0+task1)/2", fontsize=9)
+        ax.set_ylabel(f"human regret — {tname}", fontsize=9)
+        ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+
+# Middle row: grouped bar across all 7 blocks × 3 targets
+ax = fig.add_subplot(gs[3, :])
+n_blocks = len(BLOCKS); n_tgt = len(TARGETS)
+group_w = 0.85
+bar_w   = group_w / n_blocks
+xs = np.arange(n_tgt)
+for bi, (block_name, model, _, _) in enumerate(BLOCKS):
+    heights = [results[(block_name, t[0])]["r_combined"] for t in TARGETS]
+    lo_err  = [abs(results[(block_name, t[0])]["r_combined"]
+                 - results[(block_name, t[0])]["ci_combined"][0]) for t in TARGETS]
+    hi_err  = [abs(results[(block_name, t[0])]["ci_combined"][1]
+                 - results[(block_name, t[0])]["r_combined"]) for t in TARGETS]
+    offset  = (bi - (n_blocks - 1) / 2) * bar_w
+    ax.bar(xs + offset, heights, width=bar_w,
+           yerr=[lo_err, hi_err], capsize=2,
+           color=MODEL_COLORS[model], alpha=0.85,
+           edgecolor="black", linewidth=0.5,
+           label=f"{block_name}")
+ax.set_xticks(xs); ax.set_xticklabels([t[0] for t in TARGETS], fontsize=10)
+ax.axhline(0, color="grey", lw=0.8, ls=":")
+ax.set_ylabel("Pearson r (combined predictor → human task3 regret)", fontsize=11)
+ax.set_title("All blocks × all targets — combined predictor r",
+             fontsize=11, fontweight="bold")
+ax.legend(fontsize=8, ncol=4, loc="lower center", bbox_to_anchor=(0.5, -0.40))
+ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+
+# Bottom row: focused bar — does the model captures more individual difference
+# than vanilla under marginalisation?
+ax = fig.add_subplot(gs[4, :])
+focus = ["R3 marg IDRNN", "R3 marg Van+h", "R3 marg Van",
+         "R2 exact IDRNN", "R2 exact Van+h", "R2 exact Van", "R1 human→hu"]
+heights = [results[(b, "task3 (all)")]["r_combined"] for b in focus]
+lo_err  = [abs(results[(b, "task3 (all)")]["r_combined"]
+             - results[(b, "task3 (all)")]["ci_combined"][0]) for b in focus]
+hi_err  = [abs(results[(b, "task3 (all)")]["ci_combined"][1]
+             - results[(b, "task3 (all)")]["r_combined"]) for b in focus]
+focus_models = ["IDRNN", "Vanilla+h", "Vanilla",
+                "IDRNN", "Vanilla+h", "Vanilla", "Human"]
+colors = [MODEL_COLORS[m] for m in focus_models]
+xs2 = np.arange(len(focus))
+ax.bar(xs2, heights, yerr=[lo_err, hi_err], capsize=4,
+       color=colors, alpha=0.85, edgecolor="black", linewidth=0.6)
+ax.set_xticks(xs2)
+ax.set_xticklabels(focus, fontsize=10, rotation=15, ha="right")
+ax.axhline(0, color="grey", lw=0.8, ls=":")
+ax.set_ylabel("r (combined → task3-all)", fontsize=11)
+ax.set_title("Headline — predicting task3 (all horizons): "
+             "model comparison under exact vs marginalised envs",
+             fontsize=11, fontweight="bold")
+ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+
+fig.suptitle(
+    f"Cross-task individual differences: predicting task3 (horizon) human regret\n"
+    f"all-subjects step-1 seed {BEST_SEED}, "
+    f"{N_RNG_SEEDS} RNG/env seeds per condition, "
+    f"n={int(np.isfinite(hum_regret_task3).sum())} with valid task3 data",
+    fontsize=12, fontweight="bold", y=0.995)
+out = os.path.join(PLOT_DIR, "step1_cross_task_regret.png")
+fig.savefig(out, dpi=150, bbox_inches="tight")
+plt.close(fig)
+print(f"Saved → {out}")
+
 print("\nDone.")

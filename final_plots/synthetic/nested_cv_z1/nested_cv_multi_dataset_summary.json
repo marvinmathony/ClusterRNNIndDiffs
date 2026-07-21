@@ -1,0 +1,117 @@
+[
+  {
+    "idrnn_decode_pooled_r": 0.7378410115035058,
+    "idrnn_decode_pooled_p": 1.208376334193884e-35,
+    "idrnn_decode_n": 200,
+    "vanilla_decode_pooled_r": 0.7408464847994669,
+    "vanilla_decode_pooled_p": 4.560411929945144e-36,
+    "vanilla_decode_n": 200,
+    "idrnn_rsa_mean": 0.39199402063389055,
+    "idrnn_rsa_sem": 0.1190939451412072,
+    "idrnn_rsa_per_fold": [
+      0.1543879942864173,
+      0.4963874713432954,
+      0.5252065962719591
+    ],
+    "vanilla_rsa_mean": 0.266280338879332,
+    "vanilla_rsa_sem": 0.048098498951851476,
+    "vanilla_rsa_per_fold": [
+      0.36080470623496375,
+      0.20355029218567075,
+      0.23448601821736154
+    ],
+    "nll_idrnn_mean": 0.49133999928833333,
+    "nll_vanilla_mean": 0.4899167285266667,
+    "nll_idrnn_sem": 0.008663769071460384,
+    "nll_vanilla_sem": 0.008716429385137307,
+    "n_sessions_paired": 200,
+    "nll_wilcoxon_W": 6462.0,
+    "nll_wilcoxon_p": 1.1978949555438598e-05
+  },
+  {
+    "idrnn_decode_pooled_r": 0.754987836865883,
+    "idrnn_decode_pooled_p": 3.8566467427001894e-38,
+    "idrnn_decode_n": 200,
+    "vanilla_decode_pooled_r": 0.5307161968715683,
+    "vanilla_decode_pooled_p": 6.302564494967129e-16,
+    "vanilla_decode_n": 200,
+    "idrnn_rsa_mean": 0.3697594276902622,
+    "idrnn_rsa_sem": 0.08073239909883051,
+    "idrnn_rsa_per_fold": [
+      0.24074503462996594,
+      0.5183476897477993,
+      0.3501855586930214
+    ],
+    "vanilla_rsa_mean": 0.16251538249376876,
+    "vanilla_rsa_sem": 0.03909882159658578,
+    "vanilla_rsa_per_fold": [
+      0.08434965552334775,
+      0.20353290256714315,
+      0.19966358939081535
+    ],
+    "nll_idrnn_mean": 0.5062654746266666,
+    "nll_vanilla_mean": 0.5060719942483334,
+    "nll_idrnn_sem": 0.008693385909174085,
+    "nll_vanilla_sem": 0.008734821178932163,
+    "n_sessions_paired": 200,
+    "nll_wilcoxon_W": 8949.0,
+    "nll_wilcoxon_p": 0.17914010130935165
+  },
+  {
+    "idrnn_decode_pooled_r": 0.7234460381566167,
+    "idrnn_decode_pooled_p": 1.0746748875220108e-33,
+    "idrnn_decode_n": 200,
+    "vanilla_decode_pooled_r": 0.5768226057539328,
+    "vanilla_decode_pooled_p": 3.9263536639765133e-19,
+    "vanilla_decode_n": 200,
+    "idrnn_rsa_mean": 0.2983617200799295,
+    "idrnn_rsa_sem": 0.04173223643306863,
+    "idrnn_rsa_per_fold": [
+      0.29950335603036404,
+      0.37006649392957464,
+      0.22551531027984967
+    ],
+    "vanilla_rsa_mean": 0.14292562211277907,
+    "vanilla_rsa_sem": 0.052510777727294414,
+    "vanilla_rsa_per_fold": [
+      0.2354575825037367,
+      0.05364194134845718,
+      0.13967734248614333
+    ],
+    "nll_idrnn_mean": 0.5194308549183333,
+    "nll_vanilla_mean": 0.519166904245,
+    "nll_idrnn_sem": 0.00925705875078716,
+    "nll_vanilla_sem": 0.009300706827119337,
+    "n_sessions_paired": 200,
+    "nll_wilcoxon_W": 8522.0,
+    "nll_wilcoxon_p": 0.062262740881395516
+  },
+  {
+    "idrnn_decode_pooled_r": 0.729439591609082,
+    "idrnn_decode_pooled_p": 1.6078001147371822e-23,
+    "idrnn_decode_n": 134,
+    "vanilla_decode_pooled_r": 0.7888634076708996,
+    "vanilla_decode_pooled_p": 9.810186386171335e-44,
+    "vanilla_decode_n": 200,
+    "idrnn_rsa_mean": 0.35147719008411815,
+    "idrnn_rsa_sem": 0.1749835831142996,
+    "idrnn_rsa_per_fold": [
+      0.17649360696981858,
+      0.5264607731984178
+    ],
+    "vanilla_rsa_mean": 0.30422723770296095,
+    "vanilla_rsa_sem": 0.015080638508707571,
+    "vanilla_rsa_per_fold": [
+      0.3226526938792862,
+      0.3156943040289525,
+      0.27433471520064423
+    ],
+    "nll_idrnn_mean": 0.4958802781738889,
+    "nll_vanilla_mean": 0.4942889861516667,
+    "nll_idrnn_sem": 0.009225491878673187,
+    "nll_vanilla_sem": 0.009289542324489029,
+    "n_sessions_paired": 200,
+    "nll_wilcoxon_W": 6035.0,
+    "nll_wilcoxon_p": 9.633383857445487e-07
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "arch": "idrnn",
+  "selected_seed": 404,
+  "metric": "step1_specificity",
+  "value": 0.0737186324596405,
+  "canonical_runs_dir": "final_plots/dezfouli_z1_full/canonical/idrnn/runs",
+  "selected_run_dir": "final_plots/dezfouli_z1_full/canonical/idrnn/runs/seed_404",
+  "n_seeds_considered": 30,
+  "cohort": "all_101_subjects"
+}

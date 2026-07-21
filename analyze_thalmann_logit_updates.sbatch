@@ -3,7 +3,7 @@
 #SBATCH --output=logs/thal_logit_updates_%j.out
 #SBATCH --error=logs/thal_logit_updates_%j.err
 #SBATCH --open-mode=append
-#SBATCH --time=12:00:00
+#SBATCH --time=16:00:00
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
@@ -17,7 +17,9 @@
 #SBATCH --mail-user=marvin.mathony@helmholtz-munich.de
 
 # JSD / entropy / compressibility analyses for Thalmann step-1 IDRNN +
-# Vanilla model, on simulated 4-armed restless bandit rollouts.
+# Vanilla model, on simulated 4-armed restless bandit rollouts. The script
+# also runs the cross-task regret analysis (R1 human / R2 exact-sim /
+# R3 marg-sim → task3 horizon regret, for IDRNN + Vanilla + Vanilla+h).
 # GPU-enabled: rollouts run on cuda when available (auto-detected by script).
 
 set -euo pipefail

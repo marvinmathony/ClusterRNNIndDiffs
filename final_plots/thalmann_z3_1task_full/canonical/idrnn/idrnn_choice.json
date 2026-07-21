@@ -1,0 +1,23 @@
+{
+  "selected_seed": 400,
+  "score_key": "step1_specificity",
+  "selected_seed_score": -0.029253800710042317,
+  "selected_run_dir": "final_plots/thalmann_z3_1task_full/canonical/idrnn/runs/seed_400",
+  "hp": {
+    "in_dim": 5,
+    "dec_in_dim": 9,
+    "enc_in_dim": 5,
+    "z_dim": 3,
+    "hidden": 10,
+    "enc_hidden": 10,
+    "A": 4,
+    "block_structure": false,
+    "n_participants_train": 236,
+    "n_participants_test": 236,
+    "model_type": "IDRNN",
+    "task_emb_dim": 4,
+    "n_tasks": 2,
+    "reinit_decoder_per_block": true,
+    "continuous_encoder": true
+  }
+}

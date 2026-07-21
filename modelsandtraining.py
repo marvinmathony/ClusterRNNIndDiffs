@@ -179,8 +179,9 @@ class LatentRNNz(nn.Module):
                            for b in range(blocks.size(1))]
             return torch.stack(logits_list, dim=1), z, h0_
         else:
-            logits, hidden = self.decoder(self._append_task_emb(blocks, 0), z)
-            return logits, hidden, h0_, z
+            logits, _hidden = self.decoder(self._append_task_emb(blocks, 0), z)
+            # Match block_structure=True signature so callers can unpack uniformly.
+            return logits, z, h0_
         
 
 
